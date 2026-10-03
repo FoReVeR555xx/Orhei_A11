@@ -1058,6 +1058,7 @@ body.app-active { overflow:hidden !important; }
     <button data-page="template" class="admin-only">▧ &nbsp; Сервис [Шаблон A4]</button>
     <button data-page="deliveryTemplate" class="admin-only">▧ &nbsp; Доставки [Шаблон A4]</button>
     <button data-page="decoding" class="admin-only">⌘ &nbsp; Расшифровка</button>
+    <button data-page="reportBinding" class="admin-only">↔ &nbsp; Привязка</button>
   </div>
   <div class="sidebar-bottom"><div class="user-mini"><b id="sideName">Администратор</b><br><span id="sideRole">Владелец</span></div><button class="btn small" style="width:100%" onclick="logout()">Выйти</button></div>
 </aside>
@@ -1088,6 +1089,7 @@ const state = {
  walletLastUpdated: localStorage.getItem('av_wallet_last_updated')||'',
  walletArchive: JSON.parse(localStorage.getItem('av_wallet_archive')||'[]'),
  deliveryCategories: JSON.parse(localStorage.getItem('av_delivery_categories')||'[]'),
+ reportBindings: JSON.parse(localStorage.getItem('av_delivery_report_bindings')||'null') || {},
  logs: JSON.parse(localStorage.getItem('av_logs')||'[]'),
  users: JSON.parse(localStorage.getItem('av_users')||'null') || [
   {id:1,name:'Администратор',login:'admin',group:'Владельцы',status:'Активен',created:'12.09.2026',last:'Сейчас'},
@@ -1140,7 +1142,7 @@ async function loadCloudState(){
   if(error) throw error;
   if(data?.payload && Object.keys(data.payload).length){
     const p=data.payload;
-    ['services','deliveries','sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','logs','users','groups','permissions'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
+    ['services','deliveries','sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','users','groups','permissions'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
     cloudReady=true; return true;
   }
   return false;
@@ -1200,7 +1202,7 @@ ensureFixedAccounts();
 if(!Array.isArray(state.deliveryCategories)) state.deliveryCategories=[];
 state.deliveries.forEach(d=>{if(d.showTotalCost===undefined)d.showTotalCost=!!(d.totalValue);if(d.express24===undefined)d.express24=false;if(!d.specialCondition&&d.specialConditions)d.specialCondition=d.specialConditions;if(d.recipientAddress===undefined)d.recipientAddress=d.recipientData1||'';if(d.recipientFio===undefined)d.recipientFio='';if(d.recipientPhone===undefined)d.recipientPhone='';for(let i=1;i<=6;i++){if(d['model'+i]===undefined)d['model'+i]=d['recipient'+i]||''}});
 state.users.forEach(u=>{if((u.login==='av'||u.login==='kbt')&&Array.isArray(u.permissions)){['delivery.view','delivery.create','delivery.print','delivery.send','delivery.delete'].forEach(p=>{if(!u.permissions.includes(p))u.permissions.push(p)})}});
-function save(){localStorage.setItem('av_services',JSON.stringify(state.services));localStorage.setItem('av_deliveries',JSON.stringify(state.deliveries));localStorage.setItem('av_sales',JSON.stringify(state.sales));localStorage.setItem('av_sales_archive',JSON.stringify(state.salesArchive||[]));localStorage.setItem('av_wallet_rows',JSON.stringify(state.walletRows));localStorage.setItem('av_wallet_archive',JSON.stringify(state.walletArchive||[]));localStorage.setItem('av_delivery_categories',JSON.stringify(state.deliveryCategories||[]));localStorage.setItem('av_logs',JSON.stringify(state.logs));localStorage.setItem('av_users',JSON.stringify((state.users||[]).map(({password,...u})=>u)));localStorage.setItem('av_groups',JSON.stringify(state.groups));localStorage.setItem('av_permissions',JSON.stringify(state.permissions));pushCloudState()}
+function save(){localStorage.setItem('av_services',JSON.stringify(state.services));localStorage.setItem('av_deliveries',JSON.stringify(state.deliveries));localStorage.setItem('av_sales',JSON.stringify(state.sales));localStorage.setItem('av_sales_archive',JSON.stringify(state.salesArchive||[]));localStorage.setItem('av_wallet_rows',JSON.stringify(state.walletRows));localStorage.setItem('av_wallet_archive',JSON.stringify(state.walletArchive||[]));localStorage.setItem('av_delivery_categories',JSON.stringify(state.deliveryCategories||[]));localStorage.setItem('av_delivery_report_bindings',JSON.stringify(state.reportBindings||{}));localStorage.setItem('av_logs',JSON.stringify(state.logs));localStorage.setItem('av_users',JSON.stringify((state.users||[]).map(({password,...u})=>u)));localStorage.setItem('av_groups',JSON.stringify(state.groups));localStorage.setItem('av_permissions',JSON.stringify(state.permissions));pushCloudState()}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function num(v){return Number(String(v??'').replace(/\s/g,'').replace(',','.'))||0}
 function log(action,object,service='',details=''){state.logs.unshift({id:Date.now(),user:state.user?.name||'Система',action,object,service,details,date:new Date().toLocaleString('ru-RU')});save()}
@@ -1256,12 +1258,13 @@ async function logout(){
 }
 document.getElementById('loginForm').addEventListener('submit',login);
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));
-const titles={service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',decoding:'Расшифровка'};
-function navigate(page){if(['archive','logs','permissions','groups','users','template','deliveryTemplate','decoding'].includes(page)&&state.user.login!=='admin'){alert('Недостаточно прав');return}document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=titles[page];render(page)}
+const titles={service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',decoding:'Расшифровка',reportBinding:'Привязка'};
+function navigate(page){if(['archive','logs','permissions','groups','users','template','deliveryTemplate','decoding','reportBinding'].includes(page)&&state.user.login!=='admin'){alert('Недостаточно прав');return}document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=titles[page];render(page)}
 function render(page){
  const c=document.getElementById('content');
  if(page==='service') return renderService(c);
   if(page==='delivery') return renderDelivery(c);
+  if(page==='reportBinding') return renderReportBinding(c);
   if(page==='sales') return renderSales(c);
   if(page==='wallet') return renderWallet(c);
  if(page==='archive') return renderArchive(c);
@@ -2060,6 +2063,58 @@ function createDeliveryCategoryAndAssign(e,id){
  save();
  openDeliveryExistingCategoryPicker(id);
 }
+const REPORT_CATEGORY_FIELDS=[
+ {key:'fridge_gt180',label:'Холодильники =>180cm'},
+ {key:'fridge_lt180',label:'Холодильники <180cm'},
+ {key:'other_kbt',label:'Другое КБТ'},
+ {key:'mbt',label:'МБТ'},
+ {key:'tv',label:'Телевизоры'},
+ {key:'other_avit',label:'Другое AV/IT'}
+];
+function reportFieldLabel(key){return REPORT_CATEGORY_FIELDS.find(x=>x.key===key)?.label||''}
+function getReportBindingForCategory(categoryName){
+ const n=normalizeDeliveryCategoryText(categoryName);
+ const byId=state.deliveryCategories?.find(c=>normalizeDeliveryCategoryText(c.name)===n);
+ if(byId && state.reportBindings?.[String(byId.id)]) return state.reportBindings[String(byId.id)];
+ if(n==='frigider') return 'fridge_lt180';
+ return '';
+}
+function renderReportBinding(c){
+ if(state.user?.login!=='admin'){alert('Недостаточно прав');return}
+ const cats=Array.isArray(state.deliveryCategories)?state.deliveryCategories:[];
+ c.innerHTML=`<div class="page-head"><div><h1>Привязка</h1><div class="muted">Укажите, в какое поле отчёта должна попадать каждая категория товаров.</div></div></div>
+ <div class="card" style="margin-bottom:14px"><b>Как это работает</b><div class="muted" style="margin-top:7px;font-size:12px;line-height:1.5">Категория товара сначала распознаётся по «Расшифровке», затем её количество попадает в выбранное поле отчёта. Для Frigider по умолчанию используется «Холодильники &lt;180cm».</div></div>
+ <div class="table-card"><div class="table-wrap"><table><thead><tr><th>Категория</th><th>Ключевые слова</th><th>Поле отчёта</th></tr></thead><tbody>
+ ${cats.length?cats.map(cat=>{const id=String(cat.id),selected=state.reportBindings?.[id]||getReportBindingForCategory(cat.name);return `<tr><td><b>${esc(cat.name||'')}</b></td><td>${esc((cat.words||[]).join(', '))}</td><td><select onchange="setReportBinding('${id}',this.value)" style="min-width:260px"><option value="">— Не привязывать —</option>${REPORT_CATEGORY_FIELDS.map(f=>`<option value="${f.key}" ${selected===f.key?'selected':''}>${esc(f.label)}</option>`).join('')}</select></td></tr>`}).join(''):'<tr><td colspan="3" class="empty">Сначала создайте категории в «Расшифровке».</td></tr>'}
+ </tbody></table></div></div>`;
+}
+function setReportBinding(categoryId,field){
+ if(!state.reportBindings||typeof state.reportBindings!=='object')state.reportBindings={};
+ if(field)state.reportBindings[String(categoryId)]=field;else delete state.reportBindings[String(categoryId)];
+ save();log('Изменение привязки отчёта',String(categoryId),'',field?reportFieldLabel(field):'Без привязки');
+}
+function addressHasOrhei(address){return /(?:\borhei\b|оргеев|оргееве|оргея)/iu.test(String(address||''))}
+const ORHEI_COORDS={lat:47.3833,lon:28.8231};
+async function approxDeliveryDistanceKm(address){
+ const raw=String(address||'').trim(); if(!raw)return null;
+ const cacheKey='av_delivery_geocode_'+normalizeDeliveryCategoryText(raw);
+ try{const cached=JSON.parse(localStorage.getItem(cacheKey)||'null');if(cached&&Number.isFinite(cached.km))return cached.km}catch{}
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4500);
+ try{
+   const q=encodeURIComponent(raw+', Moldova');
+   const res=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=md&q='+q,{signal:controller.signal,headers:{'Accept':'application/json'}});
+   if(!res.ok)throw new Error('geocode');
+   const data=await res.json();
+   if(!data?.[0])return null;
+   const lat=Number(data[0].lat),lon=Number(data[0].lon);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;
+   const rad=Math.PI/180,dLat=(lat-ORHEI_COORDS.lat)*rad,dLon=(lon-ORHEI_COORDS.lon)*rad;
+   const a=Math.sin(dLat/2)**2+Math.cos(ORHEI_COORDS.lat*rad)*Math.cos(lat*rad)*Math.sin(dLon/2)**2;
+   const straight=6371*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+   const km=Math.max(1,Math.round(straight*1.2));
+   localStorage.setItem(cacheKey,JSON.stringify({km,at:Date.now(),name:data[0].display_name||''}));
+   return km;
+ }catch{return null}finally{clearTimeout(timer)}
+}
 function deliveryReportDateValue(d){
  if(d?.createdAt){
    const dt=new Date(Number(d.createdAt));
@@ -2199,7 +2254,7 @@ function newIndividualDelivery(){
  <div class="full"><div class="delivery-create-section"><h4>Получатель</h4><div class="form-grid"><div><label>Адрес</label><input name="recipientAddress" placeholder="Адрес"></div><div><label>ФИО</label><input name="recipientFio" placeholder="ФИО"></div><div><label>Номер телефона</label><input name="recipientPhone" placeholder="Номер телефона"></div></div></div></div>
  <div class="full"><div class="delivery-create-section"><h4>Товары / груз</h4>${Array.from({length:6},(_,i)=>deliveryCargoRowHtml(i+1)).join('')}<button id="addDeliveryCargoRowBtn" type="button" class="btn small" style="margin-top:10px" onclick="addDeliveryCargoRow()">＋ Добавить следующий ряд</button></div></div>
  <div class="full"><div class="delivery-create-section"><h4>Общая стоимость</h4><input id="deliveryCalculatedTotal" name="totalValue" type="text" value="0.00" readonly tabindex="-1"></div></div>
- <div class="full"><label>Особое условие</label><textarea name="specialCondition" rows="3" placeholder="Особое условие"></textarea></div>
+ <div class="full"><label>Приписка для отчёта (необязательно)</label><textarea name="specialCondition" rows="3" placeholder="Например: срочная доставка"></textarea></div>
  <div class="full"><div class="delivery-create-section"><h4>Дата</h4><label style="display:flex;align-items:center;gap:8px;margin:0!important"><input id="useTodayDeliveryDate" name="useTodayDate" type="checkbox" checked onchange="toggleDeliveryDateMode()" style="width:auto"> Использовать сегодняшнюю дату</label><input id="deliveryDocumentDateInput" name="documentDate" type="text" value="${new Date().toLocaleDateString('ru-RU')}" placeholder="ДД.ММ.ГГГГ" disabled tabindex="-1" maxlength="20" oninput="sanitizeManualDeliveryDateInput(this)"></div></div>
  </div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Создать Индивидуальную Доставку</button></div></form>`;
  openModal();document.querySelectorAll('[name^="model"],[name^="qty"],[name^="cost"]').forEach(x=>x.addEventListener('input',recalcDeliveryTotal));toggleDeliveryDateMode();resetDeliveryCargoRows();
@@ -2326,19 +2381,39 @@ async function generateDeliveryReport(e){
   const wb=XLSX.read(await response.arrayBuffer(),{type:'array',cellStyles:true}),ws=wb.Sheets[wb.SheetNames[0]];
   const startRow=8,range=XLSX.utils.decode_range(ws['!ref']||'A1:T323');
   for(let r=startRow;r<=range.e.r;r++)for(let c=0;c<20;c++){const a=XLSX.utils.encode_cell({r,c});if(ws[a]){ws[a].v='';ws[a].w='';ws[a].t='s';}}
-  rows.forEach((d,i)=>{const r=startRow+i,cell=c=>XLSX.utils.encode_cell({r,c}),dt=deliveryReportDateValue(d)||from;
+  for(let i=0;i<rows.length;i++){
+   const d=rows[i],r=startRow+i,cell=c=>XLSX.utils.encode_cell({r,c}),dt=deliveryReportDateValue(d)||from;
    const put=(col,value,type)=>{const a=cell(col),old=ws[a]||{};ws[a]={...old,v:value,t:type};};
-   put(0,new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()),'d');put(1,i+1,'n');put(3,String(d.recipientAddress||''),'s');put(6,deliveryCategoryDisplay(d),'s');put(15,d.deliveryType==='individual'?'individual':'online','s');put(19,`Создатель: ${String(d.createdByName||d.createdBy||'')}${d.recipientFio?' | Получатель: '+d.recipientFio:''}`,'s');
-  });
+   const counts={fridge_gt180:0,fridge_lt180:0,other_kbt:0,mbt:0,tv:0,other_avit:0};
+   for(let j=1;j<=6;j++){
+    const model=String(d['model'+j]||'').trim();if(!model)continue;
+    const qty=Math.max(1,Number(d['qty'+j]||1));
+    const cat=deliveryItemCategoryName(d,'model'+j);
+    const names=String(cat||'').split(',').map(x=>x.trim()).filter(Boolean);
+    let field='';for(const name of names){field=getReportBindingForCategory(name);if(field)break;}
+    if(field&&counts[field]!==undefined)counts[field]+=qty;
+   }
+   put(0,new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()),'d');
+   put(1,i+1,'n');
+   put(2,'Orhei','s');
+   put(3,String(d.recipientAddress||''),'s');
+   if(counts.fridge_gt180)put(4,counts.fridge_gt180,'n');
+   if(counts.fridge_lt180)put(5,counts.fridge_lt180,'n');
+   if(counts.other_kbt)put(6,counts.other_kbt,'n');
+   if(counts.mbt)put(7,counts.mbt,'n');
+   if(counts.tv)put(8,counts.tv,'n');
+   if(counts.other_avit)put(9,counts.other_avit,'n');
+   const km=await approxDeliveryDistanceKm(d.recipientAddress);
+   put(10,km&&km<=100?km:'?','s');
+   // 11,12,14 intentionally remain empty: fuel data is not supplied by deliveries.
+   put(15,'magazin'+(d.deliveryType==='individual'&&String(d.specialCondition||'').trim()?' — '+String(d.specialCondition).trim():''),'s');
+   if(addressHasOrhei(d.recipientAddress))put(16,'Город','s');
+   // 17,18,19 intentionally remain empty.
+  }
   ws['!ref']='A1:T'+Math.max(startRow+rows.length,9);
   const out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellStyles:true}),blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  let previewHtml='';
-  try{
-   previewHtml=XLSX.utils.sheet_to_html(ws,{header:'',footer:'',editable:false});
-  }catch(previewErr){
-   console.warn('Не удалось построить HTML-предпросмотр отчёта',previewErr);
-  }
+  let previewHtml='';try{previewHtml=XLSX.utils.sheet_to_html(ws,{header:'',footer:'',editable:false});}catch(previewErr){console.warn('Не удалось построить HTML-предпросмотр отчёта',previewErr)}
   const report={blob,filename:`Доставки_${iso(from)}_${iso(to)}.xlsx`,previewHtml};
   log('Формирование отчёта доставок',`${iso(from)} — ${iso(to)}`,'',`Доставок в отчёте: ${rows.length}`);
   showDeliveryReportPreview(report,rows,from,to);
