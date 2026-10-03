@@ -1010,7 +1010,7 @@ body.app-active { overflow:hidden !important; }
   .table-card .table-wrap td{white-space:nowrap!important;}
 }
 </style>
-<style id="delivery-category-styles">.delivery-unknown-row td{background:rgba(255,255,255,.025)!important}.delivery-unknown-category{color:#9fb3c8;font-weight:600}</style></head>
+<style id="delivery-category-styles">.delivery-unknown-row td{background:rgba(255,255,255,.025)!important}.delivery-unknown-category{color:#9fb3c8;font-weight:600}.delivery-unknown-action{display:inline-flex!important;align-items:center;justify-content:center;min-height:28px;padding:5px 9px!important;border-radius:7px!important;background:rgba(185,28,28,.18)!important;border:1px solid rgba(248,113,113,.55)!important;color:#fca5a5!important;font-size:11px!important;font-weight:700!important;white-space:nowrap}.delivery-unknown-action:hover{background:rgba(185,28,28,.28)!important;color:#fecaca!important}.delivery-category-item{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.08)}.delivery-category-item:last-child{border-bottom:0}.delivery-category-product{min-width:0;color:#e5edf7;font-size:12px}.delivery-category-product small{display:block;color:#8fa3b8;font-size:10px;margin-top:2px}.delivery-category-select{width:100%;min-width:0}.delivery-category-new{margin-top:14px;padding:12px;border:1px solid rgba(255,255,255,.10);border-radius:9px;background:rgba(255,255,255,.025)}.delivery-report-preview{background:#e8ebef!important;color:#111827!important}.delivery-report-preview .delivery-report-sheet{background:#fff!important;color:#111827!important;display:inline-block;min-width:100%;box-shadow:0 1px 8px rgba(0,0,0,.18)}.delivery-report-preview table{border-collapse:collapse!important;background:#fff!important;color:#111827!important}.delivery-report-preview th,.delivery-report-preview td{background:#fff!important;color:#111827!important;border-color:#777!important}.delivery-report-preview td,.delivery-report-preview th{font-family:Arial,sans-serif!important}</style></head>
 <body>
 <div id="login" class="login">
   <div class="login-glow login-glow-one"></div>
@@ -1961,11 +1961,67 @@ function getDeliveryCategories(d){
  });
  return [...new Set(result.filter(Boolean))];
 }
-function deliveryCategoryDisplay(d){
- const cats=getDeliveryCategories(d);
- return cats.length?cats.join(', '):'?';
+function getDeliveryAssignedCategories(d){
+ const a=d?.categoryAssignments;
+ return a&&typeof a==='object'?a:{};
 }
-function deliveryHasUnknownCategory(d){return deliveryCategoryDisplay(d)==='?'}
+function getDeliveryItemAutoCategories(d,key){
+ const cats=Array.isArray(state.deliveryCategories)?state.deliveryCategories:[];
+ const text=String(d?.[key]||'');
+ if(!text.trim())return [];
+ return [...new Set(cats.filter(cat=>(Array.isArray(cat.words)?cat.words:[]).some(word=>deliveryWordMatches(text,word))).map(cat=>String(cat.name||'').trim()).filter(Boolean))];
+}
+function deliveryItemCategoryName(d,key){
+ const assigned=getDeliveryAssignedCategories(d);
+ const manual=String(assigned[key]||'').trim();
+ if(manual)return manual;
+ return getDeliveryItemAutoCategories(d,key).join(', ');
+}
+function deliveryCategoryDisplay(d){
+ const names=[];
+ for(let i=1;i<=6;i++){
+   const key='model'+i;
+   if(!String(d?.[key]||'').trim())continue;
+   const value=deliveryItemCategoryName(d,key);
+   if(value)names.push(value);
+ }
+ return [...new Set(names)].join(', ')||'?';
+}
+function deliveryHasUnknownCategory(d){
+ for(let i=1;i<=6;i++){
+   const key='model'+i;
+   if(!String(d?.[key]||'').trim())continue;
+   if(!deliveryItemCategoryName(d,key))return true;
+ }
+ return false;
+}
+function deliveryCanAssignCategory(){return state.user?.login==='admin'||can('delivery.create')||can('delivery.delete')||can('delivery.send')||can('delivery.print')}
+function openDeliveryCategoryModal(id){
+ if(!deliveryCanAssignCategory()){alert('Недостаточно прав');return}
+ const d=state.deliveries.find(x=>String(x.id)===String(id));if(!d)return;
+ const cats=Array.isArray(state.deliveryCategories)?state.deliveryCategories:[];
+ const rows=Array.from({length:6},(_,i)=>{
+   const key='model'+(i+1),name=String(d[key]||'').trim();if(!name)return '';
+   const current=deliveryItemCategoryName(d,key), manual=String(getDeliveryAssignedCategories(d)[key]||'').trim();
+   return `<div class="delivery-category-item"><div class="delivery-category-product"><b>${i+1}. ${esc(name)}</b><small>Текущая категория: ${esc(current||'не указана')}</small></div><select class="delivery-category-select" data-category-key="${key}"><option value="">— Автоматически / не указана —</option>${cats.map(c=>`<option value="${esc(c.name||'')}" ${normalizeDeliveryCategoryText(c.name)===normalizeDeliveryCategoryText(manual)?'selected':''}>${esc(c.name||'')}</option>`).join('')}</select></div>`;
+ }).join('');
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Указать Категорию</h2><div class="muted">Доставка № ${esc(d.number||d.id)} · укажите категорию для каждого товара.</div></div><button class="close" onclick="closeModal()">×</button></div><div style="max-height:48vh;overflow:auto">${rows||'<div class="empty">В этой доставке нет товаров.</div>'}</div><div class="delivery-category-new"><b style="font-size:12px">Создать новую категорию</b><div class="muted" style="font-size:10px;margin:4px 0 8px">Новая категория будет доступна и для автоматического распознавания по указанным словам.</div><div class="form-grid"><label>Название<input id="newDeliveryCategoryName" placeholder="Например: Холодильники"></label><label>Ключевые слова<input id="newDeliveryCategoryWords" placeholder="Например: холодильник, frigider"></label></div><div class="form-actions" style="margin-top:8px"><button type="button" class="btn" onclick="createDeliveryCategoryAndAssign(${d.id})">＋ Создать и применить</button></div></div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button type="button" class="btn primary" onclick="saveDeliveryCategoryAssignments(${d.id})">Сохранить категории</button></div>`;openModal();
+}
+function saveDeliveryCategoryAssignments(id){
+ const d=state.deliveries.find(x=>String(x.id)===String(id));if(!d)return;
+ d.categoryAssignments=d.categoryAssignments&&typeof d.categoryAssignments==='object'?d.categoryAssignments:{};
+ document.querySelectorAll('[data-category-key]').forEach(sel=>{const v=String(sel.value||'').trim();if(v)d.categoryAssignments[sel.dataset.categoryKey]=v;else delete d.categoryAssignments[sel.dataset.categoryKey]});
+ save();closeModal();filterDeliveries();
+}
+function createDeliveryCategoryAndAssign(id){
+ const name=String(document.getElementById('newDeliveryCategoryName')?.value||'').trim(),words=normalizeCategoryWords(document.getElementById('newDeliveryCategoryWords')?.value);
+ if(!name||!words.length){alert('Укажите название категории и хотя бы одно ключевое слово.');return}
+ if(!Array.isArray(state.deliveryCategories))state.deliveryCategories=[];
+ if(state.deliveryCategories.some(x=>normalizeDeliveryCategoryText(x.name)===normalizeDeliveryCategoryText(name))){alert('Такая категория уже существует.');return}
+ state.deliveryCategories.push({id:Date.now(),name,words});
+ save();
+ openDeliveryCategoryModal(id);
+}
 function deliveryReportDateValue(d){
  if(d?.createdAt){
    const dt=new Date(Number(d.createdAt));
@@ -1982,7 +2038,7 @@ function filterDeliveries(){
  const q=(document.getElementById('deliverySearch')?.value||'').toLocaleLowerCase('ru-RU'),sort=document.getElementById('deliverySort')?.value;
  let a=state.deliveries.filter(d=>state.user.login==='admin'||d.createdBy===state.user.login).filter(d=>(JSON.stringify(d)+' '+deliveryCategoryDisplay(d)).toLocaleLowerCase('ru-RU').includes(q));
  a.sort((x,y)=>sort==='old'?x.createdAt-y.createdAt:y.createdAt-x.createdAt);
- document.getElementById('deliveryTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>Дата создания</th><th>Создатель</th><th>Категории товаров</th><th>Адрес</th><th></th></tr></thead><tbody>${a.map(d=>{const unknown=deliveryHasUnknownCategory(d);return `<tr${unknown?' class="delivery-unknown-row"':''}><td>${esc(d.dateTime||d.date||'')}</td><td>${esc(d.createdByName||d.createdBy||'')}</td><td><b class="${unknown?'delivery-unknown-category':''}">${esc(deliveryCategoryDisplay(d))}</b></td><td>${esc(d.recipientAddress||'')}</td><td><div class="actions"><button class="btn small" onclick="openDeliveryDoc(${d.id})">Открыть документ</button>${can('delivery.send')?'<button class="btn small primary" onclick="sendDeliveryDoc('+d.id+')">Отправить</button>':''}${can('delivery.delete')?'<button id="deleteDeliveryBtn_'+d.id+'" class="btn small delete-timer" onclick="startDeliveryDeleteTimer('+d.id+')">Удалить</button>':''}</div></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">Доставок пока нет</div>'
+ document.getElementById('deliveryTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>Дата создания</th><th>Создатель</th><th>Категории товаров</th><th>Адрес</th><th></th></tr></thead><tbody>${a.map(d=>{const unknown=deliveryHasUnknownCategory(d);return `<tr${unknown?' class="delivery-unknown-row"':''}><td>${esc(d.dateTime||d.date||'')}</td><td>${esc(d.createdByName||d.createdBy||'')}</td><td><b class="${unknown?'delivery-unknown-category':''}">${esc(deliveryCategoryDisplay(d))}</b></td><td>${esc(d.recipientAddress||'')}</td><td><div class="actions"><button class="btn small" onclick="openDeliveryDoc(${d.id})">Открыть документ</button>${unknown&&deliveryCanAssignCategory()?'<button class="btn small delivery-unknown-action" onclick="openDeliveryCategoryModal('+d.id+')">Указать Категорию</button>':''}${can('delivery.send')?'<button class="btn small primary" onclick="sendDeliveryDoc('+d.id+')">Отправить</button>':''}${can('delivery.delete')?'<button id="deleteDeliveryBtn_'+d.id+'" class="btn small delete-timer" onclick="startDeliveryDeleteTimer('+d.id+')">Удалить</button>':''}</div></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">Доставок пока нет</div>'
 }
 function deliveryCargoRowHtml(i,visible=i===1){
  const removeBtn=i>1?`<button type="button" class="btn small delivery-remove-row" onclick="removeDeliveryCargoRow(${i})">− Убрать ряд</button>`:'';
@@ -2219,7 +2275,7 @@ function showDeliveryReportPreview(report,rows,from,to){
  window.pendingDeliveryReport=report;
  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
  const previewHtml=report.previewHtml||'<div style="padding:20px;color:#9fb3c8">Предпросмотр недоступен.</div>';
- document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Предпросмотр отчёта</h2><div class="muted">Период: ${iso(from)} — ${iso(to)} · Доставок: ${rows.length}</div></div><button class="close" onclick="closeDeliveryReportPreview()">×</button></div><div style="margin:14px 0;border:1px solid rgba(255,255,255,.10);border-radius:10px;overflow:auto;max-height:65vh;background:#fff"><div style="min-width:900px;padding:8px">${previewHtml}</div></div><div class="form-actions"><button type="button" class="btn" onclick="closeDeliveryReportPreview()">Закрыть</button><button type="button" class="btn primary" onclick="downloadPendingDeliveryReport()">↓ Скачать Excel</button></div>`;
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Предпросмотр отчёта</h2><div class="muted">Период: ${iso(from)} — ${iso(to)} · Доставок: ${rows.length}</div></div><button class="close" onclick="closeDeliveryReportPreview()">×</button></div><div class="delivery-report-preview" style="margin:14px 0;border:1px solid rgba(255,255,255,.10);border-radius:10px;overflow:auto;max-height:65vh;padding:12px"><div class="delivery-report-sheet" style="min-width:900px;padding:8px">${previewHtml}</div></div><div class="form-actions"><button type="button" class="btn" onclick="closeDeliveryReportPreview()">Закрыть</button><button type="button" class="btn primary" onclick="downloadPendingDeliveryReport()">↓ Скачать Excel</button></div>`;
  openModal();
 }
 async function generateDeliveryReport(e){
