@@ -1003,7 +1003,7 @@ body.app-active { overflow:hidden !important; }
   .table-card .table-wrap td{white-space:nowrap!important;}
 }
 </style>
-</head>
+<style id="delivery-category-styles">.delivery-unknown-row td{background:#fff1f2!important}.delivery-unknown-category{color:#b42318;font-weight:800}</style></head>
 <body>
 <div id="login" class="login">
   <div class="login-glow login-glow-one"></div>
@@ -1050,6 +1050,7 @@ body.app-active { overflow:hidden !important; }
     <button data-page="users" class="admin-only">♙ &nbsp; Пользователи</button>
     <button data-page="template" class="admin-only">▧ &nbsp; Сервис [Шаблон A4]</button>
     <button data-page="deliveryTemplate" class="admin-only">▧ &nbsp; Доставки [Шаблон A4]</button>
+    <button data-page="decoding" class="admin-only">⌘ &nbsp; Расшифровка</button>
   </div>
   <div class="sidebar-bottom"><div class="user-mini"><b id="sideName">Администратор</b><br><span id="sideRole">Владелец</span></div><button class="btn small" style="width:100%" onclick="logout()">Выйти</button></div>
 </aside>
@@ -1079,6 +1080,7 @@ const state = {
  walletRows: JSON.parse(localStorage.getItem('av_wallet_rows')||'[]'),
  walletLastUpdated: localStorage.getItem('av_wallet_last_updated')||'',
  walletArchive: JSON.parse(localStorage.getItem('av_wallet_archive')||'[]'),
+ deliveryCategories: JSON.parse(localStorage.getItem('av_delivery_categories')||'[]'),
  logs: JSON.parse(localStorage.getItem('av_logs')||'[]'),
  users: JSON.parse(localStorage.getItem('av_users')||'null') || [
   {id:1,name:'Администратор',login:'admin',group:'Владельцы',status:'Активен',created:'12.09.2026',last:'Сейчас'},
@@ -1131,7 +1133,7 @@ async function loadCloudState(){
   if(error) throw error;
   if(data?.payload && Object.keys(data.payload).length){
     const p=data.payload;
-    ['services','deliveries','sales','salesArchive','walletRows','walletLastUpdated','walletArchive','logs','users','groups','permissions'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
+    ['services','deliveries','sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','logs','users','groups','permissions'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
     cloudReady=true; return true;
   }
   return false;
@@ -1188,9 +1190,10 @@ function ensureFixedAccounts(){
   save();
 }
 ensureFixedAccounts();
+if(!Array.isArray(state.deliveryCategories)) state.deliveryCategories=[];
 state.deliveries.forEach(d=>{if(d.showTotalCost===undefined)d.showTotalCost=!!(d.totalValue);if(d.express24===undefined)d.express24=false;if(!d.specialCondition&&d.specialConditions)d.specialCondition=d.specialConditions;if(d.recipientAddress===undefined)d.recipientAddress=d.recipientData1||'';if(d.recipientFio===undefined)d.recipientFio='';if(d.recipientPhone===undefined)d.recipientPhone='';for(let i=1;i<=6;i++){if(d['model'+i]===undefined)d['model'+i]=d['recipient'+i]||''}});
 state.users.forEach(u=>{if((u.login==='av'||u.login==='kbt')&&Array.isArray(u.permissions)){['delivery.view','delivery.create','delivery.print','delivery.send','delivery.delete'].forEach(p=>{if(!u.permissions.includes(p))u.permissions.push(p)})}});
-function save(){localStorage.setItem('av_services',JSON.stringify(state.services));localStorage.setItem('av_deliveries',JSON.stringify(state.deliveries));localStorage.setItem('av_sales',JSON.stringify(state.sales));localStorage.setItem('av_sales_archive',JSON.stringify(state.salesArchive||[]));localStorage.setItem('av_wallet_rows',JSON.stringify(state.walletRows));localStorage.setItem('av_wallet_archive',JSON.stringify(state.walletArchive||[]));localStorage.setItem('av_logs',JSON.stringify(state.logs));localStorage.setItem('av_users',JSON.stringify((state.users||[]).map(({password,...u})=>u)));localStorage.setItem('av_groups',JSON.stringify(state.groups));localStorage.setItem('av_permissions',JSON.stringify(state.permissions));pushCloudState()}
+function save(){localStorage.setItem('av_services',JSON.stringify(state.services));localStorage.setItem('av_deliveries',JSON.stringify(state.deliveries));localStorage.setItem('av_sales',JSON.stringify(state.sales));localStorage.setItem('av_sales_archive',JSON.stringify(state.salesArchive||[]));localStorage.setItem('av_wallet_rows',JSON.stringify(state.walletRows));localStorage.setItem('av_wallet_archive',JSON.stringify(state.walletArchive||[]));localStorage.setItem('av_delivery_categories',JSON.stringify(state.deliveryCategories||[]));localStorage.setItem('av_logs',JSON.stringify(state.logs));localStorage.setItem('av_users',JSON.stringify((state.users||[]).map(({password,...u})=>u)));localStorage.setItem('av_groups',JSON.stringify(state.groups));localStorage.setItem('av_permissions',JSON.stringify(state.permissions));pushCloudState()}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function num(v){return Number(String(v??'').replace(/\s/g,'').replace(',','.'))||0}
 function log(action,object,service='',details=''){state.logs.unshift({id:Date.now(),user:state.user?.name||'Система',action,object,service,details,date:new Date().toLocaleString('ru-RU')});save()}
@@ -1246,8 +1249,8 @@ async function logout(){
 }
 document.getElementById('loginForm').addEventListener('submit',login);
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));
-const titles={service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]'};
-function navigate(page){if(['archive','logs','permissions','groups','users','template','deliveryTemplate'].includes(page)&&state.user.login!=='admin'){alert('Недостаточно прав');return}document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=titles[page];render(page)}
+const titles={service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',decoding:'Расшифровка'};
+function navigate(page){if(['archive','logs','permissions','groups','users','template','deliveryTemplate','decoding'].includes(page)&&state.user.login!=='admin'){alert('Недостаточно прав');return}document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=titles[page];render(page)}
 function render(page){
  const c=document.getElementById('content');
  if(page==='service') return renderService(c);
@@ -1261,6 +1264,7 @@ function render(page){
  if(page==='users') return renderUsers(c);
  if(page==='template') return renderTemplate(c);
   if(page==='deliveryTemplate') return renderDeliveryTemplate(c);
+  if(page==='decoding') return renderDeliveryDecoding(c);
 }
 const DEFAULT_FIELD_LAYOUT={
 cod:{label:"Codul de la buletin",key:"cod",x:5.32,y:1.856,size:13,font:"Arial",w:258.7,h:24.5,wrap:false,align:"left",breaks:[],maxChars:0,testText:""},
@@ -1930,8 +1934,49 @@ function renderWallet(c){
  c.innerHTML=`<div class="page-head"><div><h1>Кошелёк</h1><div class="muted">${isAdmin?'Полная аналитика всех аккаунтов':'Обработанные продажи аккаунта '+esc(state.user.name||state.user.login)}</div></div>${isAdmin?'<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end"><label class="btn primary" style="cursor:pointer">Актуализировать данные<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="importWalletFile(this)"></label><button class="btn danger" onclick="archiveAllSales()">Архивировать</button></div>':''}</div>${analytics}<div class="table-card" style="margin-top:20px"><div class="toolbar"><b style="padding:8px 4px">Обработанные успешные продажи</b></div><div class="wallet-table-wrap"><table class="wallet-table"><thead><tr><th>Дата</th><th>№ чека</th><th>Код товара</th><th>Наименование</th><th>Сумма</th><th>Количество</th><th>${rankHead}</th>${extraHead}<th>${illiquidHead}</th><th>${supplierHead}</th><th>Аккаунт</th></tr></thead><tbody>${sorted.length?sorted.map(x=>{const grouped=x.groupId&&groupCounts[x.groupId]>1;const acct=rowAccount(x);const rowClass=grouped?(acct==='bosch'?'wallet-bosch-group':acct==='haier'?'wallet-haier-group':'wallet-duplicate'):'';return `<tr class="${rowClass}"><td>${esc(x.date)}</td><td>${receiptDisplay(x)}</td><td>${esc(x.code)}</td><td>${esc(x.product)}</td><td>${esc(x.sum)}</td><td>${esc(x.quantity)}</td><td>${num(x.rank)?formatMoney(isAdmin?num(x.rank):num(x.rank)/100*30):''}</td>${extraCells(x)}<td>${num(x.illiquid)?formatMoney(isAdmin?num(x.illiquid):num(x.illiquid)/100*30):''}</td><td>${num(x.supplier)?formatMoney(isAdmin?num(x.supplier):num(x.supplier)/100*30):''}</td><td>${esc(x.account)}</td></tr>`}).join(''):`<tr><td colspan="${colspan}" class="empty">Пока нет обработанных совпадений.</td></tr>`}</tbody></table></div></div>`;
 }
 
-function renderDelivery(c){let mine=state.deliveries.filter(d=>state.user.login==='admin'||d.createdBy===state.user.login);c.innerHTML=`<div class="page-head"><div><h1>Доставки</h1><div class="muted">Активные созданные доставки</div></div>${can('delivery.create')?'<button class="btn primary" onclick="newDelivery()">＋ Создать доставку</button>':''}</div><div class="grid stats"><div class="stat"><div class="label">Всего доставок</div><div class="num">${mine.length}</div></div><div class="stat"><div class="label">Создано сегодня</div><div class="num">${mine.filter(x=>x.date===new Date().toLocaleDateString('ru-RU')).length}</div></div><div class="stat"><div class="label">Активные</div><div class="num">${mine.length}</div></div><div class="stat"><div class="label">Мои документы</div><div class="num">${mine.length}</div></div></div><div class="table-card" style="margin-top:20px"><div class="toolbar"><input id="deliverySearch" placeholder="Поиск по заявке, заказчику, перевозчику..." oninput="filterDeliveries()"><select id="deliverySort" onchange="filterDeliveries()"><option value="new">Сначала новые</option><option value="old">Сначала старые</option></select></div><div id="deliveryTable"></div></div>`;filterDeliveries()}
-function filterDeliveries(){const q=(document.getElementById('deliverySearch')?.value||'').toLowerCase(),sort=document.getElementById('deliverySort')?.value;let a=state.deliveries.filter(d=>state.user.login==='admin'||d.createdBy===state.user.login).filter(d=>JSON.stringify(d).toLowerCase().includes(q));a.sort((x,y)=>sort==='old'?x.createdAt-y.createdAt:y.createdAt-x.createdAt);document.getElementById('deliveryTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>Заявка №</th><th>Заказчик</th><th>Перевозчик</th><th>Дата погрузки</th><th>Создатель</th><th>Дата создания</th><th></th></tr></thead><tbody>${a.map(d=>`<tr><td><b>${esc(d.number)}</b></td><td>${esc(d.customer)}</td><td>${esc(d.carrier)}</td><td>${esc(d.loadingDate)}</td><td>${esc(d.createdByName)}</td><td>${esc(d.dateTime)}</td><td><div class="actions"><button class="btn small" onclick="openDeliveryDoc(${d.id})">Открыть документ</button>${can('delivery.send')?'<button class="btn small primary" onclick="sendDeliveryDoc('+d.id+')">Отправить</button>':''}${can('delivery.delete')?'<button id="deleteDeliveryBtn_'+d.id+'" class="btn small delete-timer" onclick="startDeliveryDeleteTimer('+d.id+')">Удалить</button>':''}</div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Доставок пока нет</div>'}
+function normalizeDeliveryCategoryText(v){
+ return String(v||'').toLocaleLowerCase('ru-RU').replace(/ё/g,'е').trim();
+}
+function deliveryWordMatches(text,word){
+ const t=normalizeDeliveryCategoryText(text), w=normalizeDeliveryCategoryText(word);
+ if(!t||!w)return false;
+ const escaped=w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ try{return new RegExp('(^|[^\\p{L}\\p{N}])'+escaped+'([^\\p{L}\\p{N}]|$)','iu').test(t)}
+ catch(e){return t.includes(w)}
+}
+function getDeliveryCategories(d){
+ const cats=Array.isArray(state.deliveryCategories)?state.deliveryCategories:[];
+ const productText=Array.from({length:6},(_,i)=>String(d['model'+(i+1)]||'')).filter(Boolean).join(' ');
+ const result=[];
+ cats.forEach(cat=>{
+   const words=Array.isArray(cat.words)?cat.words:[];
+   if(words.some(word=>deliveryWordMatches(productText,word))) result.push(String(cat.name||'').trim());
+ });
+ return [...new Set(result.filter(Boolean))];
+}
+function deliveryCategoryDisplay(d){
+ const cats=getDeliveryCategories(d);
+ return cats.length?cats.join(', '):'?';
+}
+function deliveryHasUnknownCategory(d){return deliveryCategoryDisplay(d)==='?'}
+function deliveryReportDateValue(d){
+ if(d?.createdAt){
+   const dt=new Date(Number(d.createdAt));
+   if(!Number.isNaN(dt.getTime()))return dt;
+ }
+ const raw=String(d?.dateTime||d?.date||'').trim(),m=raw.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+ if(m)return new Date(Number(m[3]),Number(m[2])-1,Number(m[1]));
+ return null;
+}
+function renderDelivery(c){
+ let mine=state.deliveries.filter(d=>state.user.login==='admin'||d.createdBy===state.user.login),admin=state.user.login==='admin';
+ c.innerHTML=`<div class="page-head"><div><h1>Доставки</h1><div class="muted">Активные созданные доставки</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${admin?'<button class="btn" onclick="openDeliveryReportModal()">▤ Сформировать Отчёт</button><button class="btn" onclick="newIndividualDelivery()">＋ Создать Индивидуальную Доставку</button>':''}${can('delivery.create')?'<button class="btn primary" onclick="newDelivery()">＋ Создать доставку</button>':''}</div></div><div class="grid stats"><div class="stat"><div class="label">Всего доставок</div><div class="num">${mine.length}</div></div><div class="stat"><div class="label">Создано сегодня</div><div class="num">${mine.filter(x=>x.date===new Date().toLocaleDateString('ru-RU')).length}</div></div><div class="stat"><div class="label">Активные</div><div class="num">${mine.length}</div></div><div class="stat"><div class="label">Мои документы</div><div class="num">${mine.length}</div></div></div><div class="table-card" style="margin-top:20px"><div class="toolbar"><input id="deliverySearch" placeholder="Поиск по создателю, категории, адресу..." oninput="filterDeliveries()"><select id="deliverySort" onchange="filterDeliveries()"><option value="new">Сначала новые</option><option value="old">Сначала старые</option></select></div><div id="deliveryTable"></div></div>`;filterDeliveries()}
+function filterDeliveries(){
+ const q=(document.getElementById('deliverySearch')?.value||'').toLocaleLowerCase('ru-RU'),sort=document.getElementById('deliverySort')?.value;
+ let a=state.deliveries.filter(d=>state.user.login==='admin'||d.createdBy===state.user.login).filter(d=>(JSON.stringify(d)+' '+deliveryCategoryDisplay(d)).toLocaleLowerCase('ru-RU').includes(q));
+ a.sort((x,y)=>sort==='old'?x.createdAt-y.createdAt:y.createdAt-x.createdAt);
+ document.getElementById('deliveryTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>Дата создания</th><th>Создатель</th><th>Категории товаров</th><th>Адрес</th><th></th></tr></thead><tbody>${a.map(d=>{const unknown=deliveryHasUnknownCategory(d);return `<tr${unknown?' class="delivery-unknown-row"':''}><td>${esc(d.dateTime||d.date||'')}</td><td>${esc(d.createdByName||d.createdBy||'')}</td><td><b class="${unknown?'delivery-unknown-category':''}">${esc(deliveryCategoryDisplay(d))}</b></td><td>${esc(d.recipientAddress||'')}</td><td><div class="actions"><button class="btn small" onclick="openDeliveryDoc(${d.id})">Открыть документ</button>${can('delivery.send')?'<button class="btn small primary" onclick="sendDeliveryDoc('+d.id+')">Отправить</button>':''}${can('delivery.delete')?'<button id="deleteDeliveryBtn_'+d.id+'" class="btn small delete-timer" onclick="startDeliveryDeleteTimer('+d.id+')">Удалить</button>':''}</div></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">Доставок пока нет</div>'
+}
 function deliveryCargoRowHtml(i,visible=i===1){
  const removeBtn=i>1?`<button type="button" class="btn small delivery-remove-row" onclick="removeDeliveryCargoRow(${i})">− Убрать ряд</button>`:'';
  return `<div class="delivery-cargo-grid delivery-cargo-row" id="deliveryCargoRow${i}" style="grid-template-columns:32px 1.5fr .75fr .9fr auto;${visible?'':'display:none'}">
@@ -2046,6 +2091,19 @@ function toggleDeliveryDateMode(){
  input.style.cursor=useToday?'not-allowed':'';
  if(useToday) input.value=new Date().toLocaleDateString('ru-RU');
 }
+function newIndividualDelivery(){
+ if(state.user?.login!=='admin'){alert('Недостаточно прав');return}
+ window.deliveryVisibleRows=1;
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Создание индивидуальной доставки</h2><div class="muted">Тип доставки: Индивидуальная. Поля можно расширить после уточнения требований.</div></div><button class="close" onclick="closeModal()">×</button></div><form onsubmit="createIndividualDelivery(event)"><div class="form-grid">
+ <div class="full"><div class="delivery-create-section"><h4>Получатель</h4><div class="form-grid"><div><label>Адрес</label><input name="recipientAddress" placeholder="Адрес"></div><div><label>ФИО</label><input name="recipientFio" placeholder="ФИО"></div><div><label>Номер телефона</label><input name="recipientPhone" placeholder="Номер телефона"></div></div></div></div>
+ <div class="full"><div class="delivery-create-section"><h4>Товары / груз</h4>${Array.from({length:6},(_,i)=>deliveryCargoRowHtml(i+1)).join('')}<button id="addDeliveryCargoRowBtn" type="button" class="btn small" style="margin-top:10px" onclick="addDeliveryCargoRow()">＋ Добавить следующий ряд</button></div></div>
+ <div class="full"><div class="delivery-create-section"><h4>Общая стоимость</h4><input id="deliveryCalculatedTotal" name="totalValue" type="text" value="0.00" readonly tabindex="-1"></div></div>
+ <div class="full"><label>Особое условие</label><textarea name="specialCondition" rows="3" placeholder="Особое условие"></textarea></div>
+ <div class="full"><div class="delivery-create-section"><h4>Дата</h4><label style="display:flex;align-items:center;gap:8px;margin:0!important"><input id="useTodayDeliveryDate" name="useTodayDate" type="checkbox" checked onchange="toggleDeliveryDateMode()" style="width:auto"> Использовать сегодняшнюю дату</label><input id="deliveryDocumentDateInput" name="documentDate" type="text" value="${new Date().toLocaleDateString('ru-RU')}" placeholder="ДД.ММ.ГГГГ" disabled tabindex="-1" maxlength="20" oninput="sanitizeManualDeliveryDateInput(this)"></div></div>
+ </div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Создать Индивидуальную Доставку</button></div></form>`;
+ openModal();document.querySelectorAll('[name^="model"],[name^="qty"],[name^="cost"]').forEach(x=>x.addEventListener('input',recalcDeliveryTotal));toggleDeliveryDateMode();resetDeliveryCargoRows();
+}
+function createIndividualDelivery(e){createDelivery(e,true)}
 function newDelivery(){
  window.deliveryVisibleRows=1;
  document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Создание доставки</h2><div class="muted">Заполните данные доставки</div></div><button class="close" onclick="closeModal()">×</button></div>
@@ -2091,7 +2149,7 @@ function syncDeliveryModeCheckboxes(mode){
  if(mode==='express'&&express.checked)pre.checked=false;
  if(mode==='precomanda'&&pre.checked)express.checked=false;
 }
-function createDelivery(e){
+function createDelivery(e,isIndividual=false){
  e.preventDefault();
  const f=new FormData(e.target),now=new Date(),id=Date.now();
  const number='AV-D-'+now.getFullYear()+'-'+String(state.deliveries.length+1).padStart(5,'0');
@@ -2103,6 +2161,7 @@ function createDelivery(e){
  let total=0;
  const d={
    id,number,requestNo:number,
+   deliveryType:isIndividual?'individual':'standard',
    recipientAddress:String(f.get('recipientAddress')||'').trim(),
    recipientFio:String(f.get('recipientFio')||'').trim(),
    recipientPhone:String(f.get('recipientPhone')||'').trim(),
@@ -2132,6 +2191,32 @@ function createDelivery(e){
  state.deliveries.unshift(d);
  log('Создание доставки',number,number,'Создана новая доставка');
  save();closeModal();renderDelivery(document.getElementById('content'))
+}
+function openDeliveryReportModal(){
+ if(state.user?.login!=='admin'){alert('Недостаточно прав');return}
+ const today=new Date(),first=new Date(today.getFullYear(),today.getMonth(),1),fmt=d=>d.toISOString().slice(0,10);
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Сформировать Отчёт</h2><div class="muted">В отчёт попадут доставки по дате создания, включая обе выбранные даты.</div></div><button class="close" onclick="closeModal()">×</button></div><form onsubmit="generateDeliveryReport(event)"><div class="form-grid"><label>С даты<input id="deliveryReportFrom" name="from" type="date" value="${fmt(first)}" required></label><label>По дату<input id="deliveryReportTo" name="to" type="date" value="${fmt(today)}" required></label></div><div class="card" style="margin-top:14px"><div class="muted">Используется предоставленный Excel-шаблон. Точное распределение всех полей можно уточнить позже.</div></div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Сформировать Excel</button></div></form>`;openModal();
+}
+async function generateDeliveryReport(e){
+ e.preventDefault();if(state.user?.login!=='admin'){alert('Недостаточно прав');return}
+ const from=new Date((document.getElementById('deliveryReportFrom')?.value||'')+'T00:00:00'),to=new Date((document.getElementById('deliveryReportTo')?.value||'')+'T23:59:59.999');
+ if(Number.isNaN(from.getTime())||Number.isNaN(to.getTime())||from>to){alert('Проверьте выбранный период.');return}
+ const rows=state.deliveries.filter(d=>{const dt=deliveryReportDateValue(d);return dt&&dt>=from&&dt<=to});
+ try{
+  const response=await fetch('assets/delivery-report-template.xlsx',{cache:'no-store'});if(!response.ok)throw new Error('Не удалось загрузить шаблон Excel');
+  const wb=XLSX.read(await response.arrayBuffer(),{type:'array',cellStyles:true}),ws=wb.Sheets[wb.SheetNames[0]];
+  const startRow=8,range=XLSX.utils.decode_range(ws['!ref']||'A1:T323');
+  for(let r=startRow;r<=range.e.r;r++)for(let c=0;c<20;c++){const a=XLSX.utils.encode_cell({r,c});if(ws[a]){ws[a].v='';ws[a].w='';ws[a].t='s';}}
+  rows.forEach((d,i)=>{const r=startRow+i,cell=c=>XLSX.utils.encode_cell({r,c}),dt=deliveryReportDateValue(d)||from;
+   const put=(col,value,type)=>{const a=cell(col),old=ws[a]||{};ws[a]={...old,v:value,t:type};};
+   put(0,new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()),'d');put(1,i+1,'n');put(3,String(d.recipientAddress||''),'s');put(6,deliveryCategoryDisplay(d),'s');put(15,d.deliveryType==='individual'?'individual':'online','s');put(19,`Создатель: ${String(d.createdByName||d.createdBy||'')}${d.recipientFio?' | Получатель: '+d.recipientFio:''}`,'s');
+  });
+  ws['!ref']='A1:T'+Math.max(startRow+rows.length,9);
+  const out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellStyles:true}),blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  a.href=url;a.download=`Доставки_${iso(from)}_${iso(to)}.xlsx`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  log('Формирование отчёта доставок',`${iso(from)} — ${iso(to)}`,'',`Доставок в отчёте: ${rows.length}`);closeModal();
+ }catch(err){console.error(err);alert('Не удалось сформировать отчёт: '+(err.message||'ошибка'))}
 }
 function sendDeliveryDoc(id){const d=state.deliveries.find(x=>x.id===id);if(!d)return;log('Отправка документа',d.number,d.number,'Документ подготовлен к отправке');save();alert('Документ доставки подготовлен к отправке.')}
 function openDeliveryDoc(id){currentDeliveryDocId=id;renderDeliveryDocument(id,false)}
@@ -2380,6 +2465,16 @@ function renderGroups(c){c.innerHTML=`<div class="page-head"><div><h1>Групп
 function addGroup(){let name=prompt('Название группы:');if(!name)return;state.groups.push({id:Date.now(),name,desc:'Новая группа',permissions:[]});save();renderGroups(document.getElementById('content'));log('Создание группы',name)}
 function editGroup(id){let g=state.groups.find(x=>x.id===id),n=prompt('Название группы:',g.name);if(n){let old=g.name;g.name=n;save();log('Изменение группы',n,'',`Было: ${old}; Стало: ${n}`);renderGroups(document.getElementById('content'))}}
 function toggleGroupPerm(id,key,on){let g=state.groups.find(x=>x.id===id);g.permissions=g.permissions||[];g.permissions=on?[...new Set([...g.permissions,key])]:g.permissions.filter(x=>x!==key);save();log('Изменение прав группы',g.name,'',`${key}: ${on?'разрешено':'запрещено'}`)}
+function renderDeliveryDecoding(c){
+ if(state.user?.login!=='admin'){alert('Недостаточно прав');return}
+ const cats=Array.isArray(state.deliveryCategories)?state.deliveryCategories:[];
+ c.innerHTML=`<div class="page-head"><div><h1>Расшифровка</h1><div class="muted">Категории товаров и слова для распознавания без учёта регистра.</div></div><button class="btn primary" onclick="addDeliveryCategory()">＋ Добавить категорию</button></div><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Категория</th><th>Слова для распознавания</th><th></th></tr></thead><tbody>${cats.length?cats.map(x=>`<tr><td><b>${esc(x.name||'')}</b></td><td>${esc((x.words||[]).join(', '))}</td><td class="actions"><button class="btn small" onclick="editDeliveryCategory(${JSON.stringify(x.id)})">Изменить</button><button class="btn small danger" onclick="deleteDeliveryCategory(${JSON.stringify(x.id)})">Удалить</button></td></tr>`).join(''):'<tr><td colspan="3" class="empty">Категории ещё не настроены. Пока все товары будут отображаться как ?</td></tr>'}</tbody></table></div></div>`;
+}
+function normalizeCategoryWords(v){return [...new Set(String(v||'').split(/[\\n,;]+/).map(x=>x.trim()).filter(Boolean).map(normalizeDeliveryCategoryText))]}
+function addDeliveryCategory(){if(state.user?.login!=='admin')return;document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Новая категория</h2><div class="muted">Слова отделяйте новой строкой или запятой.</div></div><button class="close" onclick="closeModal()">×</button></div><form onsubmit="saveDeliveryCategory(event)"><div class="form-grid"><label>Название категории<input name="name" required placeholder="Например: Frigider"></label><label class="full">Слова<input name="words" required placeholder="frigider, холодильник, fridge"></label></div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Сохранить</button></div></form>`;openModal()}
+function editDeliveryCategory(id){const x=state.deliveryCategories.find(c=>String(c.id)===String(id));if(!x)return;document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Изменение категории</h2><div class="muted">Регистр букв не учитывается.</div></div><button class="close" onclick="closeModal()">×</button></div><form onsubmit="saveDeliveryCategory(event,${JSON.stringify(x.id)})"><div class="form-grid"><label>Название категории<input name="name" required value="${esc(x.name||'')}"></label><label class="full">Слова<input name="words" required value="${esc((x.words||[]).join(', '))}"></label></div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Сохранить</button></div></form>`;openModal()}
+function saveDeliveryCategory(e,id){e.preventDefault();const f=new FormData(e.target),name=String(f.get('name')||'').trim(),words=normalizeCategoryWords(f.get('words'));if(!name||!words.length){alert('Укажите название категории и хотя бы одно слово.');return}if(!Array.isArray(state.deliveryCategories))state.deliveryCategories=[];const dup=state.deliveryCategories.find(x=>String(x.id)!==String(id||'')&&normalizeDeliveryCategoryText(x.name)===normalizeDeliveryCategoryText(name));if(dup){alert('Такая категория уже существует.');return}if(id){const x=state.deliveryCategories.find(c=>String(c.id)===String(id));if(x){x.name=name;x.words=words}log('Изменение расшифровки',name,'',`Слов: ${words.length}`)}else{state.deliveryCategories.push({id:Date.now(),name,words});log('Создание расшифровки',name,'',`Слов: ${words.length}`)}save();closeModal();renderDeliveryDecoding(document.getElementById('content'))}
+function deleteDeliveryCategory(id){const x=state.deliveryCategories.find(c=>String(c.id)===String(id));if(!x)return;if(!confirm(`Удалить категорию «${x.name}»?`))return;state.deliveryCategories=state.deliveryCategories.filter(c=>String(c.id)!==String(id));save();log('Удаление расшифровки',x.name);renderDeliveryDecoding(document.getElementById('content'))}
 function renderUsers(c){
  const allPerms=Array.isArray(state.permissions)?state.permissions:[];
  c.innerHTML=`<div class="page-head"><div><h1>Пользователи</h1><div class="muted">Создание, изменение, удаление пользователей и управление их правами</div></div><button class="btn primary" onclick="addUser()">＋ Добавить пользователя</button></div><div class="table-card"><table><thead><tr><th>Название</th><th>Логин</th><th>Группа</th><th>Права</th><th>Статус</th><th>Создан</th><th>Последняя активность</th><th></th></tr></thead><tbody>${state.users.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.login)}</td><td>${esc(u.group||'')}</td><td>${u.login==='admin'?'Все':(Array.isArray(u.permissions)?u.permissions.length:0)+' / '+allPerms.length}</td><td><span class="badge ${u.status==='Активен'?'ok':'off'}">${esc(u.status||'Активен')}</span></td><td>${esc(u.created||'')}</td><td>${esc(u.last||'')}</td><td class="actions"><button class="btn small" onclick="editUser(${JSON.stringify(u.id)})">Изменить</button>${u.login!=='admin'?`<button class="btn small danger" onclick="deleteUser(${JSON.stringify(u.id)})">Удалить</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;
