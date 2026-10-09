@@ -1051,7 +1051,7 @@ body.app-active { overflow:hidden !important; }
 .delivery-status-select:disabled{opacity:.8;cursor:not-allowed}
 .delivery-km-total{display:inline-flex;align-items:center;justify-content:center;min-width:0;padding:0;border:1px solid transparent;border-radius:0;background:transparent!important;box-shadow:none!important;color:var(--muted,#667085);font-size:11px;font-weight:800;white-space:nowrap}
 .delivery-km-total.has-km{border-color:transparent!important;background:transparent!important;color:inherit}
-.delivery-notice-list{display:grid;gap:12px;max-height:58vh;overflow:auto;margin:16px 0}
+.delivery-notice-hero{display:flex;justify-content:center;align-items:center;max-height:150px;overflow:hidden;margin:-4px 0 8px}.delivery-notice-hero img{display:block;max-width:250px;width:42%;max-height:145px;object-fit:contain}.delivery-category-hero{display:flex;justify-content:center;align-items:center;max-height:150px;overflow:hidden;margin:-2px 0 10px}.delivery-category-hero img{display:block;max-width:160px;width:35%;max-height:140px;object-fit:contain}.delivery-notice-list{display:grid;gap:12px;max-height:58vh;overflow:auto;margin:16px 0}
 .delivery-notice-item{border:1px solid rgba(96,165,250,.24);border-radius:12px;padding:14px;background:rgba(255,255,255,.035)}
 .delivery-notice-item h3{margin:0 0 8px;color:#f0f7ff;font-size:15px}
 .delivery-notice-meta{display:flex;gap:8px 16px;flex-wrap:wrap;color:#b7c8d9;font-size:12px;margin-bottom:8px}
@@ -2212,7 +2212,7 @@ function openDeliveryCategoryModal(id){
  const d=state.deliveries.find(x=>String(x.id)===String(id));if(!d||(!deliveryCanAssignCategory(d)&&!deliveryCanCreateCategory(d))){alert('Недостаточно прав');return;}
  const unknown=deliveryUnknownItemKeys(d);
  const cats=Array.isArray(state.deliveryCategories)?state.deliveryCategories:[];
- document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Указать категорию</h2><div class="muted">Доставка № ${esc(d.number||d.id)}</div></div><button class="close" onclick="closeModal()">×</button></div>
+ document.getElementById('modalBox').innerHTML=`<div class="delivery-category-hero"><img src="assets/Error.png" alt="Нужно указать категорию товара"></div><div class="modal-head"><div><h2 style="margin:0">Указать категорию</h2><div class="muted">Доставка № ${esc(d.number||d.id)}</div></div><button class="close" onclick="closeModal()">×</button></div>
  <div style="display:grid;gap:10px;margin-top:8px">
    ${deliveryCanAssignCategory(d)?`<button type="button" class="btn primary" onclick="openDeliveryExistingCategoryPicker(${d.id})">Выбрать существующую категорию</button>`:''}
    ${deliveryCanCreateCategory(d)?`<button type="button" class="btn" onclick="openDeliveryCreateCategoryPicker(${d.id})">＋ Создать категорию</button>`:''}
@@ -2904,6 +2904,7 @@ function permissionLocation(p){
  const k=String(p.key||'');
  if(k==='template.view'||k==='deliveryTemplate.view'||k==='deliveryTemplate.manage'||k.startsWith('reportBinding.'))return {main:'Документы',sub:'Шаблоны и привязки'};
  if(k.startsWith('service.')||k==='template.manage')return {main:'Работа',sub:'Сервис'};
+ if(k==='delivery.notify.own'||k==='delivery.notify.all')return {main:'Управление',sub:'Уведомления'};
  if(k.startsWith('delivery.')||k.startsWith('decoding.'))return {main:'Работа',sub:'Доставки'};
  if(k.startsWith('sales.')||k.startsWith('salesArchive.'))return {main:'Работа',sub:'Продажи'};
  if(k.startsWith('wallet.'))return {main:'Работа',sub:'Кошелёк'};
@@ -3017,7 +3018,7 @@ function maybeShowDeliveryNotifications(){
  const pending=getPendingDeliveryNotifications();if(!pending.length)return;
  window.currentDeliveryNoticeIds=pending.map(d=>String(d.id));
  box.dataset.locked='delivery-notice';
- box.innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Доставки выполнены</h2><div class="muted">Нужно ознакомиться с результатами доставок</div></div></div><div class="delivery-notice-list">${pending.map(d=>{const products=deliveryNoticeProducts(d),km=d.distanceKm!==undefined&&d.distanceKm!==null&&String(d.distanceKm).trim()!==''?`${esc(d.distanceKm)} км`:'Данные ещё не получены';return `<article class="delivery-notice-item"><h3>${esc(d.number||d.requestNo||('Доставка №'+d.id))}</h3><div class="delivery-notice-meta"><span><b>Доставлено:</b> ${esc(deliveryNoticeTime(d))}</span><span><b>Км пройдено:</b> ${km}</span><span><b>Адрес:</b> ${esc(d.recipientAddress||'не указан')}</span></div><b style="display:block;color:#dce8f5;font-size:12px;margin-bottom:6px">Доставленные товары</b>${products.length?`<ul class="delivery-notice-products">${products.map(x=>`<li>${esc(x.model)} — ${esc(x.qty)} шт.</li>`).join('')}</ul>`:'<div class="delivery-notice-empty">Товары не указаны в документе.</div>'}</article>`}).join('')}</div><div class="form-actions"><button type="button" class="btn" onclick="snoozeDeliveryNotifications()">Не сейчас</button><button type="button" class="btn primary" onclick="acknowledgeDeliveryNotifications()">Ознакомился</button></div>`;
+ box.innerHTML=`<div class="delivery-notice-hero"><img src="assets/ADV.png" alt="Уведомление о доставке"></div><div class="modal-head"><div><h2 style="margin:0">Доставки выполнены</h2><div class="muted">Нужно ознакомиться с результатами доставок</div></div></div><div class="delivery-notice-list">${pending.map(d=>{const products=deliveryNoticeProducts(d),km=d.distanceKm!==undefined&&d.distanceKm!==null&&String(d.distanceKm).trim()!==''?`${esc(d.distanceKm)} км`:'Данные ещё не получены';return `<article class="delivery-notice-item"><h3>${esc(d.number||d.requestNo||('Доставка №'+d.id))}</h3><div class="delivery-notice-meta"><span><b>Получатель:</b> ${esc(d.recipientFio||'не указан')}</span><span><b>Телефон:</b> ${esc(d.recipientPhone||'не указан')}</span><span><b>Адрес:</b> ${esc(d.recipientAddress||'не указан')}</span><span><b>Доставлено:</b> ${esc(deliveryNoticeTime(d))}</span><span><b>Км пройдено:</b> ${km}</span></div><b style="display:block;color:#dce8f5;font-size:12px;margin-bottom:6px">Доставленные товары</b>${products.length?`<ul class="delivery-notice-products">${products.map(x=>`<li>${esc(x.model)} — ${esc(x.qty)} шт.</li>`).join('')}</ul>`:'<div class="delivery-notice-empty">Товары не указаны в документе.</div>'}</article>`}).join('')}</div><div class="form-actions"><button type="button" class="btn" onclick="snoozeDeliveryNotifications()">Не сейчас</button><button type="button" class="btn primary" onclick="acknowledgeDeliveryNotifications()">Ознакомился</button></div>`;
  openModal();
 }
 function closeDeliveryNoticeModal(){const box=document.getElementById('modalBox');if(box)delete box.dataset.locked;document.getElementById('modal').classList.remove('show')}
