@@ -36,3 +36,13 @@
 - Проверить продажи, кошелёк, архивы, группы и права — эти разделы остаются в `app_state`.
 
 Перед публикацией рекомендуется скачать отдельную резервную копию проекта Supabase: таблицы `backup_20261009_*` находятся в том же проекте и не заменяют независимый экспорт базы.
+
+### Supabase Preview: remote migration version missing locally
+
+The connected production project already records migration version
+`20261009143724` (`create_prechange_backup_20261009`). The corresponding local
+migration file is included as a no-op history-alignment entry because the original
+pre-change backups contain production-specific data and were created directly in
+the database. Do not delete remote migration history or reset the production DB to
+resolve this mismatch. The schema migration for normalized orders/services is
+`20261009170000_normalize_site_data.sql`.
