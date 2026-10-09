@@ -2918,12 +2918,17 @@ function permissionLocation(p){
 }
 function renderPermissionTabs(listId,perms,checked,cls,disabled){
  const nested={};
- (perms||[]).forEach(p=>{const loc=permissionLocation(p);nested[loc.main]??={};nested[loc.main][loc.sub]??=[];nested[loc.main][loc.sub].push(p)});
+ // Always include current built-in notification permissions, even if cloud state contains an older catalogue.
+ const source=[...(Array.isArray(perms)?perms:[])];
+ const seen=new Set(source.map(p=>String(p.key||'')));
+ PERMISSION_CATALOG.filter(p=>p.key.startsWith('delivery.notify.')).forEach(p=>{if(!seen.has(p.key))source.push({id:'builtin-'+p.key,...p})});
+ source.forEach(p=>{const loc=permissionLocation(p);nested[loc.main]??={};nested[loc.main][loc.sub]??=[];nested[loc.main][loc.sub].push(p)});
  const mainOrder=['Работа','Документы','Управление','Прочее'];
  const mains=[...mainOrder.filter(x=>nested[x]),...Object.keys(nested).filter(x=>!mainOrder.includes(x))];
+ const subOrder={'Управление':['Пользователи','Группы','Права','Настройки сайта','Уведомления','Логи'],'Работа':['Сервис','Доставки','Продажи','Кошелёк','Архив'],'Документы':['Шаблоны и привязки']};
  const mainTabs=mains.map((m,i)=>`<button type="button" class="permission-tab ${i===0?'active':''}" data-perm-main-tab="${esc(m)}" onclick="activatePermissionMain('${listId}','${esc(m)}')">${esc(m)}</button>`).join('');
- const panels=mains.map((m,mi)=>{const subs=Object.keys(nested[m]);return `<section class="permission-tab-panel ${mi===0?'active':''}" data-perm-main-panel="${esc(m)}"><div class="permission-sub-tabs">${subs.map((sub,si)=>`<button type="button" class="permission-tab ${si===0?'active':''}" data-perm-sub-tab="${esc(sub)}" onclick="activatePermissionSub('${listId}','${esc(m)}','${esc(sub)}')">${esc(sub)}</button>`).join('')}</div>${subs.map((sub,si)=>`<div class="permission-list permission-tab-panel ${si===0?'active':''}" data-perm-sub-panel="${esc(sub)}">${nested[m][sub].map(p=>`<label class="permission-item"><input type="checkbox" class="${cls}" value="${esc(p.key)}" ${checked.has(p.key)?'checked':''} ${disabled?'disabled':''}><span><b>${esc(p.name)}</b><br><code>${esc(p.key)}</code></span></label>`).join('')}</div>`).join('')}</section>`}).join('');
- return `<div class="permission-tabs" id="${listId}"><div class="permission-main-tabs">${mainTabs}</div>${panels}</div>`;
+ const panels=mains.map((m,mi)=>{const subs=Object.keys(nested[m]).sort((a,b)=>{const order=subOrder[m]||[];return (order.indexOf(a)<0?999:order.indexOf(a))-(order.indexOf(b)<0?999:order.indexOf(b))});return `<section class="permission-tab-panel ${mi===0?'active':''}" data-perm-main-panel="${esc(m)}"><div class="permission-sub-tabs">${subs.map((sub,si)=>`<button type="button" class="permission-tab ${si===0?'active':''}" data-perm-sub-tab="${esc(sub)}" onclick="activatePermissionSub('${listId}','${esc(m)}','${esc(sub)}')">${esc(sub)}</button>`).join('')}</div>${subs.map((sub,si)=>`<div class="permission-list permission-tab-panel ${si===0?'active':''}" data-perm-sub-panel="${esc(sub)}">${nested[m][sub].map(p=>`<label class="permission-item"><input type="checkbox" class="${cls}" value="${esc(p.key)}" ${checked.has(p.key)?'checked':''} ${disabled?'disabled':''}><span><b>${esc(p.name)}</b><br><code>${esc(p.key)}</code></span></label>`).join('')}</div>`).join('')}</section>`}).join('');
+ return `<div class="permission-tabs" id="${listId}"><div class="permission-main-tabs">${mainTabs}</div>${panels}<div class="muted" style="font-size:12px;margin-top:8px">Права уведомлений находятся во вкладке «Управление» → «Уведомления».</div></div>`;
 }
 function activatePermissionMain(listId,main){
  const root=document.getElementById(listId);if(!root)return;
@@ -2938,6 +2943,7 @@ function activatePermissionSub(listId,main,sub){
 }
 function addUser(){
  if(!requirePermission('users.manage'))return
+ ensurePermissionCatalog();
  const perms=Array.isArray(state.permissions)?state.permissions:[];
  const id='new-'+Date.now();
  const safe=id.replace(/[^A-Za-z0-9_-]/g,'_');
@@ -2965,6 +2971,7 @@ async function createUserFromModal(safe){
 }
 function editUser(id){
  if(!requirePermission('users.manage'))return
+ ensurePermissionCatalog();
  const u=state.users.find(x=>String(x.id)===String(id));if(!u)return;
  const perms=Array.isArray(state.permissions)?state.permissions:[]; const checked=new Set(Array.isArray(u.permissions)?u.permissions:[]); const isAdmin=u.login==='admin'; const safe=String(id).replace(/[^A-Za-z0-9_-]/g,'_');
  const ph=renderPermissionTabs('userPermList_'+safe,perms,checked,'user-perm',isAdmin);
