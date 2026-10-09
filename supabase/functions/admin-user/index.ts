@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       error: callerProfileError,
     } = await admin
       .from('profiles')
-      .select('id,login,status')
+      .select('id,login,status,permissions')
       .eq('id', caller.id)
       .maybeSingle()
 
@@ -127,12 +127,13 @@ Deno.serve(async (req) => {
     const isAdmin =
       String(callerLogin).toLowerCase() === 'admin' &&
       callerProfile?.status !== 'Неактивен'
+    const callerPermissions = Array.isArray(callerProfile?.permissions)
+      ? callerProfile.permissions.map((p: unknown) => String(p))
+      : []
+    const canManageUsers = isAdmin || (callerProfile?.status !== 'Неактивен' && callerPermissions.includes('users.manage'))
 
-    if (!isAdmin) {
-      return json(
-        { error: 'Недостаточно прав' },
-        403,
-      )
+    if (!canManageUsers) {
+      return json({ error: 'Недостаточно прав: требуется users.manage' }, 403)
     }
 
     // ============================================================
@@ -178,10 +179,12 @@ Deno.serve(async (req) => {
         body.status || 'Активен',
       )
 
-      const permissions =
-        Array.isArray(body.permissions)
-          ? body.permissions
-          : []
+      const requestedPermissions = Array.isArray(body.permissions)
+        ? body.permissions.map((p: unknown) => String(p))
+        : []
+      const permissions = isAdmin
+        ? requestedPermissions
+        : requestedPermissions.filter((p: string) => callerPermissions.includes(p))
 
       if (
         !validLogin(login) ||
@@ -340,6 +343,9 @@ Deno.serve(async (req) => {
           404,
         )
       }
+      if (normalizeLogin(current.login) === 'admin' && !isAdmin) {
+        return json({ error: 'Управлять главным администратором может только он сам' }, 403)
+      }
 
       userId = current.id
 
@@ -372,18 +378,16 @@ Deno.serve(async (req) => {
         body.status ?? current.status,
       )
 
-      const permissions =
-        current.login === 'admin'
-          ? (
-              Array.isArray(current.permissions)
-                ? current.permissions
-                : []
-            )
-          : (
-              Array.isArray(body.permissions)
-                ? body.permissions
-                : []
-            )
+      const requestedPermissions = Array.isArray(body.permissions)
+        ? body.permissions.map((p: unknown) => String(p))
+        : Array.isArray(current.permissions)
+          ? current.permissions
+          : []
+      const permissions = current.login === 'admin'
+        ? (Array.isArray(current.permissions) ? current.permissions : [])
+        : isAdmin
+          ? requestedPermissions
+          : requestedPermissions.filter((p: string) => callerPermissions.includes(p))
 
       const password = body.password
         ? String(body.password)
@@ -491,187 +495,85 @@ Deno.serve(async (req) => {
     // ============================================================
 
     if (action === 'delete') {
-      console.log('DELETE START', body)
+      const requestedLogin = normalizeLogin(body.login)
+      const requestedId = String(body.userId || '').trim()
+      let profile: Record<string, any> | null = null
 
-      let userId = String(
-        body.userId || '',
-      ).trim()
-
-      const requestedLogin =
-        normalizeLogin(body.login)
-
-      if (!userId && !requestedLogin) {
-        return json(
-          { error: 'Не указан пользователь' },
-          400,
-        )
+      // Prefer the stable login from the UI. A stale UUID must not prevent
+      // deletion of the intended account when the login still matches.
+      if (requestedLogin) {
+        const { data, error } = await admin
+          .from('profiles')
+          .select('*')
+          .eq('login', requestedLogin)
+          .maybeSingle()
+        if (error) return json({ error: `Ошибка поиска профиля: ${error.message}` }, 500)
+        profile = data
       }
 
-      let currentQuery = admin
-        .from('profiles')
-        .select('id,login')
-        .limit(1)
-
-      if (
-        userId &&
-        /^[0-9a-f-]{36}$/i.test(userId)
-      ) {
-        currentQuery =
-          currentQuery.eq('id', userId)
-      } else if (requestedLogin) {
-        currentQuery =
-          currentQuery.eq(
-            'login',
-            requestedLogin,
-          )
+      if (!profile && requestedId && /^[0-9a-f-]{36}$/i.test(requestedId)) {
+        const { data, error } = await admin
+          .from('profiles')
+          .select('*')
+          .eq('id', requestedId)
+          .maybeSingle()
+        if (error) return json({ error: `Ошибка поиска профиля: ${error.message}` }, 500)
+        profile = data
       }
 
-      const {
-        data: current,
-        error: currentError,
-      } = await currentQuery.maybeSingle()
-
-      console.log(
-        'DELETE PROFILE LOOKUP',
-        {
-          current,
-          currentError,
-        },
-      )
-
-      if (currentError) {
-        console.error(
-          'Ошибка поиска пользователя для удаления:',
-          currentError,
-        )
-
-        return json(
-          {
-            error:
-              `Ошибка profiles: ${currentError.message}`,
-          },
-          500,
-        )
+      if (!profile && !requestedLogin && !requestedId) {
+        return json({ error: 'Не указан пользователь' }, 400)
       }
 
-      if (!current) {
-        return json(
-          {
-            error:
-              'Пользователь не найден в profiles',
-          },
-          404,
-        )
+      if (profile?.login && normalizeLogin(profile.login) === 'admin') {
+        return json({ error: 'Главного администратора удалить нельзя' }, 400)
       }
 
-      userId = current.id
+      let authUserId = String(profile?.id || '')
+      const loginForLookup = requestedLogin || normalizeLogin(profile?.login)
 
-      console.log(
-        'DELETE USER ID:',
-        userId,
-      )
-
-      if (userId === caller.id) {
-        return json(
-          {
-            error:
-              'Нельзя удалить текущего администратора',
-          },
-          400,
-        )
+      // Recover orphaned Auth accounts whose profile row is missing.
+      if (!authUserId && requestedId && /^[0-9a-f-]{36}$/i.test(requestedId)) {
+        authUserId = requestedId
+      }
+      if (!authUserId && loginForLookup) {
+        const { data: usersPage, error: listError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+        if (listError) return json({ error: `Не удалось найти Auth-пользователя: ${listError.message}` }, 500)
+        const authMatch = usersPage.users.find(u => normalizeLogin(u.email) === emailForLogin(loginForLookup).toLowerCase())
+        if (authMatch) authUserId = authMatch.id
       }
 
-      if (current.login === 'admin') {
-        return json(
-          {
-            error:
-              'Главного администратора удалить нельзя',
-          },
-          400,
-        )
+      if (!authUserId) {
+        return json({ error: 'Пользователь не найден ни в profiles, ни в Supabase Auth' }, 404)
+      }
+      if (authUserId === caller.id) {
+        return json({ error: 'Нельзя удалить текущую учётную запись администратора' }, 400)
       }
 
-      // ------------------------------------------------------------
-      // DELETE AUTH USER
-      // ------------------------------------------------------------
-
-      console.log(
-        'DELETE AUTH START:',
-        userId,
-      )
-
-      const {
-        error: deleteAuthError,
-      } =
-        await admin.auth.admin.deleteUser(
-          userId,
-        )
-
-      console.log(
-        'DELETE AUTH RESULT:',
-        deleteAuthError,
-      )
-
-      if (deleteAuthError) {
-        console.error(
-          'Ошибка удаления Auth пользователя:',
-          deleteAuthError,
-        )
-
-        return json(
-          {
-            error:
-              `Ошибка удаления пользователя из Auth: ${deleteAuthError.message}`,
-          },
-          400,
-        )
+      // Remove profile first to avoid stale profile rows. If Auth deletion
+      // fails, restore the profile so the account remains manageable.
+      if (profile) {
+        const { error: profileDeleteError } = await admin
+          .from('profiles')
+          .delete()
+          .eq('id', profile.id)
+        if (profileDeleteError) {
+          return json({ error: `Не удалось удалить профиль: ${profileDeleteError.message}` }, 500)
+        }
       }
 
-      // ------------------------------------------------------------
-      // DELETE PROFILE
-      // ------------------------------------------------------------
-
-      console.log(
-        'DELETE PROFILE START:',
-        userId,
-      )
-
-      const {
-        error: deleteProfileError,
-      } = await admin
-        .from('profiles')
-        .delete()
-        .eq('id', userId)
-
-      console.log(
-        'DELETE PROFILE RESULT:',
-        deleteProfileError,
-      )
-
-      if (deleteProfileError) {
-        console.error(
-          'Ошибка удаления профиля:',
-          deleteProfileError,
-        )
-
-        return json(
-          {
-            error:
-              `Auth-пользователь удалён, но профиль не удалился: ${deleteProfileError.message}`,
-          },
-          500,
-        )
+      const { error: authDeleteError } = await admin.auth.admin.deleteUser(authUserId)
+      if (authDeleteError) {
+        if (profile) {
+          const { error: restoreError } = await admin.from('profiles').upsert(profile)
+          if (restoreError) {
+            return json({ error: `Не удалось удалить Auth-пользователя: ${authDeleteError.message}. Также не удалось восстановить профиль: ${restoreError.message}` }, 500)
+          }
+        }
+        return json({ error: `Не удалось удалить пользователя из Supabase Auth: ${authDeleteError.message}` }, 400)
       }
 
-      console.log(
-        'USER SUCCESSFULLY DELETED:',
-        userId,
-      )
-
-      return json({
-        ok: true,
-        deletedUserId: userId,
-      })
+      return json({ ok: true, deletedUserId: authUserId, deletedLogin: profile?.login || loginForLookup || null })
     }
 
     // ============================================================
