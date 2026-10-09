@@ -1062,13 +1062,29 @@ body.app-active { overflow:hidden !important; }
 .site-settings-card .delivery-settings-toggle{background:rgba(255,255,255,.035)!important;border:1px solid rgba(104,163,210,.26)!important;border-radius:12px;padding:16px 18px;cursor:pointer}
 .site-settings-card .delivery-settings-toggle>b,.site-settings-card .delivery-settings-toggle span>b{color:#eaf5ff!important}
 .site-settings-card .delivery-settings-toggle input{box-shadow:0 0 0 1px rgba(0,0,0,.22),0 3px 12px rgba(0,0,0,.22)}
-.delivery-list-card .table-wrap{width:100%;max-width:100%;overflow:auto}
+.permission-tabs{display:flex;flex-direction:column;gap:12px;min-width:0}
+.permission-main-tabs,.permission-sub-tabs{display:flex;gap:7px;flex-wrap:wrap}
+.permission-tab{border:1px solid rgba(115,160,205,.22);border-radius:8px;background:rgba(255,255,255,.035);color:#b9cce0;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer}
+.permission-tab.active{background:rgba(37,99,235,.22);border-color:rgba(96,165,250,.65);color:#eff6ff}
+.permission-sub-tabs{padding:0 0 10px;border-bottom:1px solid rgba(255,255,255,.10)}
+.permission-tab-panel{display:none;min-width:0}
+.permission-tab-panel.active{display:block}
+.permission-list{max-height:300px;overflow:auto;padding:3px 8px;border:1px solid rgba(115,160,205,.20);border-radius:9px;background:rgba(0,0,0,.10)}
+.permission-item{display:flex!important;align-items:center;gap:9px;padding:9px 3px!important;margin:0!important;border-bottom:1px solid rgba(255,255,255,.075);color:#e5edf7;font-size:12px;font-weight:500}
+.permission-item:last-child{border-bottom:0}
+.permission-item input{width:auto;flex:0 0 auto;margin:0;accent-color:#3b82f6}
+.permission-item code{color:#91b5d9;font-size:10px}
+
+/* Keep delivery action buttons in their original compact row; scroll the table, not the buttons. */
+.delivery-list-card{min-width:0;max-width:100%;overflow:hidden}
+.delivery-list-card .table-wrap{display:block;width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
 .delivery-list-card .table-wrap table{width:max-content;min-width:100%;table-layout:auto}
-.delivery-list-card .table-wrap td:last-child{white-space:normal!important;min-width:150px;max-width:220px}
-.delivery-list-card .actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap;max-width:210px}
-.delivery-list-card .actions .btn{max-width:100%;box-sizing:border-box;white-space:normal;overflow-wrap:anywhere}
-.delivery-list-card .delivery-status-select{box-sizing:border-box}
-@media(max-width:700px){.delivery-list-card .table-wrap{max-width:calc(100vw - 32px)!important;overflow-x:auto!important}.delivery-list-card .table-wrap td:last-child{min-width:140px;max-width:180px}.delivery-list-card .actions{max-width:170px}.delivery-list-card .actions .btn{font-size:10px;padding:6px 8px}}
+.delivery-list-card .table-wrap td:last-child{white-space:nowrap!important;min-width:0;max-width:none}
+.delivery-list-card .actions{display:flex;gap:5px;align-items:center;flex-wrap:nowrap;max-width:none;white-space:nowrap}
+.delivery-list-card .actions .btn{flex:0 0 auto;max-width:none;box-sizing:border-box;white-space:nowrap;overflow-wrap:normal}
+.delivery-list-card .delivery-status-select{box-sizing:border-box;background:transparent!important;appearance:auto;-webkit-appearance:auto}
+.delivery-list-card .delivery-status-waiting .delivery-status-select,.delivery-list-card .delivery-status-delivered .delivery-status-select{background:transparent!important}
+@media(max-width:700px){.delivery-list-card .table-wrap{max-width:100%!important;overflow-x:auto!important}.delivery-list-card .table-wrap td:last-child{min-width:0;max-width:none}.delivery-list-card .actions{max-width:none}.delivery-list-card .actions .btn{font-size:12px;padding:7px 10px}}
 </style>
 </head>
 <body>
@@ -2858,13 +2874,48 @@ function renderUsers(c){
  const allPerms=Array.isArray(state.permissions)?state.permissions:[];
  c.innerHTML=`<div class="page-head"><div><h1>Пользователи</h1><div class="muted">Создание, изменение, удаление пользователей и управление их правами</div></div>${can('users.manage')?'<button class="btn primary" onclick="addUser()">＋ Добавить пользователя</button>':''}</div><div class="table-card"><table><thead><tr><th>Название</th><th>Логин</th><th>Группа</th><th>Права</th><th>Статус</th><th>Создан</th><th>Последняя активность</th><th></th></tr></thead><tbody>${state.users.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.login)}</td><td>${esc(u.group||'')}</td><td>${u.login==='admin'?'Все':(Array.isArray(u.permissions)?u.permissions.length:0)+' / '+allPerms.length}</td><td><span class="badge ${u.status==='Активен'?'ok':'off'}">${esc(u.status||'Активен')}</span></td><td>${esc(u.created||'')}</td><td>${esc(u.last||'')}</td><td class="actions">${can('users.manage')?`<button class="btn small" onclick='editUser(${JSON.stringify(String(u.id))})'>Изменить</button>${u.login!=='admin'?`<button class="btn small danger" onclick='deleteUser(${JSON.stringify(String(u.id))})'>Удалить</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`;
 }
+function permissionLocation(p){
+ const k=String(p.key||'');
+ if(k==='template.view'||k==='deliveryTemplate.view'||k==='deliveryTemplate.manage'||k.startsWith('reportBinding.'))return {main:'Документы',sub:'Шаблоны и привязки'};
+ if(k.startsWith('service.')||k==='template.manage')return {main:'Работа',sub:'Сервис'};
+ if(k.startsWith('delivery.')||k.startsWith('decoding.'))return {main:'Работа',sub:'Доставки'};
+ if(k.startsWith('sales.')||k.startsWith('salesArchive.'))return {main:'Работа',sub:'Продажи'};
+ if(k.startsWith('wallet.'))return {main:'Работа',sub:'Кошелёк'};
+ if(k.startsWith('archive.'))return {main:'Работа',sub:'Архив'};
+ if(k.startsWith('users.'))return {main:'Управление',sub:'Пользователи'};
+ if(k.startsWith('groups.'))return {main:'Управление',sub:'Группы'};
+ if(k.startsWith('permissions.'))return {main:'Управление',sub:'Права'};
+ if(k==='settings.view')return {main:'Управление',sub:'Настройки сайта'};
+ if(k==='logs.view')return {main:'Управление',sub:'Логи'};
+ return {main:'Прочее',sub:'Другие права'};
+}
+function renderPermissionTabs(listId,perms,checked,cls,disabled){
+ const nested={};
+ (perms||[]).forEach(p=>{const loc=permissionLocation(p);nested[loc.main]??={};nested[loc.main][loc.sub]??=[];nested[loc.main][loc.sub].push(p)});
+ const mainOrder=['Работа','Документы','Управление','Прочее'];
+ const mains=[...mainOrder.filter(x=>nested[x]),...Object.keys(nested).filter(x=>!mainOrder.includes(x))];
+ const mainTabs=mains.map((m,i)=>`<button type="button" class="permission-tab ${i===0?'active':''}" data-perm-main-tab="${esc(m)}" onclick="activatePermissionMain('${listId}','${esc(m)}')">${esc(m)}</button>`).join('');
+ const panels=mains.map((m,mi)=>{const subs=Object.keys(nested[m]);return `<section class="permission-tab-panel ${mi===0?'active':''}" data-perm-main-panel="${esc(m)}"><div class="permission-sub-tabs">${subs.map((sub,si)=>`<button type="button" class="permission-tab ${si===0?'active':''}" data-perm-sub-tab="${esc(sub)}" onclick="activatePermissionSub('${listId}','${esc(m)}','${esc(sub)}')">${esc(sub)}</button>`).join('')}</div>${subs.map((sub,si)=>`<div class="permission-list permission-tab-panel ${si===0?'active':''}" data-perm-sub-panel="${esc(sub)}">${nested[m][sub].map(p=>`<label class="permission-item"><input type="checkbox" class="${cls}" value="${esc(p.key)}" ${checked.has(p.key)?'checked':''} ${disabled?'disabled':''}><span><b>${esc(p.name)}</b><br><code>${esc(p.key)}</code></span></label>`).join('')}</div>`).join('')}</section>`}).join('');
+ return `<div class="permission-tabs" id="${listId}"><div class="permission-main-tabs">${mainTabs}</div>${panels}</div>`;
+}
+function activatePermissionMain(listId,main){
+ const root=document.getElementById(listId);if(!root)return;
+ root.querySelectorAll('[data-perm-main-tab]').forEach(b=>b.classList.toggle('active',b.dataset.permMainTab===main));
+ root.querySelectorAll('[data-perm-main-panel]').forEach(p=>p.classList.toggle('active',p.dataset.permMainPanel===main));
+ const panel=[...root.querySelectorAll('[data-perm-main-panel]')].find(p=>p.dataset.permMainPanel===main);const sub=panel?.querySelector('[data-perm-sub-tab]')?.dataset.permSubTab;if(sub)activatePermissionSub(listId,main,sub);
+}
+function activatePermissionSub(listId,main,sub){
+ const root=document.getElementById(listId);if(!root)return;const panel=[...root.querySelectorAll('[data-perm-main-panel]')].find(p=>p.dataset.permMainPanel===main);if(!panel)return;
+ panel.querySelectorAll('[data-perm-sub-tab]').forEach(b=>b.classList.toggle('active',b.dataset.permSubTab===sub));
+ panel.querySelectorAll('[data-perm-sub-panel]').forEach(p=>p.classList.toggle('active',p.dataset.permSubPanel===sub));
+}
 function addUser(){
  if(!requirePermission('users.manage'))return
  const perms=Array.isArray(state.permissions)?state.permissions:[];
  const id='new-'+Date.now();
  const safe=id.replace(/[^A-Za-z0-9_-]/g,'_');
- const ph=perms.map(p=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid #eef0f3"><input type="checkbox" class="new-user-perm" value="${esc(p.key)}" style="width:auto"><span><b>${esc(p.name)}</b><br><code>${esc(p.key)}</code></span></label>`).join('');
- document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Новый пользователь</h2><div class="muted">Создание учётной записи в Supabase Auth</div></div><button class="close" onclick="closeModal()">×</button></div><div class="form-grid"><label>Название<input id="nu_name_${safe}" value=""></label><label>Логин<input id="nu_login_${safe}" value="" autocomplete="off"></label><label>Пароль<input id="nu_password_${safe}" type="password" value="" autocomplete="new-password"></label><label>Группа<input id="nu_group_${safe}" value="Сотрудники"></label><label>Статус<select id="nu_status_${safe}"><option value="Активен">Активен</option><option value="Неактивен">Неактивен</option></select></label></div><div class="card" style="margin-top:16px"><h3 style="margin-top:0">Права доступа (${perms.length})</h3><div style="display:flex;gap:8px;margin-bottom:10px"><button type="button" class="btn small" onclick="setUserPermissionSelection('newPermList_${safe}','.new-user-perm',true)">Выбрать все</button><button type="button" class="btn small" onclick="setUserPermissionSelection('newPermList_${safe}','.new-user-perm',false)">Снять все</button></div><div id="newPermList_${safe}" style="max-height:320px;overflow:auto">${ph||'<div class="muted">Права ещё не созданы.</div>'}</div></div><div class="form-actions"><button class="btn" onclick="closeModal()">Отмена</button><button class="btn primary" onclick="createUserFromModal('${safe}')">Создать</button></div>`;
+ const ph=renderPermissionTabs('newPermList_'+safe,perms,new Set(),'new-user-perm',false);
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Новый пользователь</h2><div class="muted">Создание учётной записи в Supabase Auth</div></div><button class="close" onclick="closeModal()">×</button></div><div class="form-grid"><label>Название<input id="nu_name_${safe}" value=""></label><label>Логин<input id="nu_login_${safe}" value="" autocomplete="off"></label><label>Пароль<input id="nu_password_${safe}" type="password" value="" autocomplete="new-password"></label><label>Группа<input id="nu_group_${safe}" value="Сотрудники"></label><label>Статус<select id="nu_status_${safe}"><option value="Активен">Активен</option><option value="Неактивен">Неактивен</option></select></label></div><div class="card" style="margin-top:16px"><h3 style="margin-top:0">Права доступа (${perms.length})</h3><div style="display:flex;gap:8px;margin-bottom:10px"><button type="button" class="btn small" onclick="setUserPermissionSelection('newPermList_${safe}','.new-user-perm',true)">Выбрать все</button><button type="button" class="btn small" onclick="setUserPermissionSelection('newPermList_${safe}','.new-user-perm',false)">Снять все</button></div>${ph||'<div class="muted">Права ещё не созданы.</div>'}</div><div class="form-actions"><button class="btn" onclick="closeModal()">Отмена</button><button class="btn primary" onclick="createUserFromModal('${safe}')">Создать</button></div>`;
  openModal();
 }
 async function createUserFromModal(safe){
@@ -2889,8 +2940,8 @@ function editUser(id){
  if(!requirePermission('users.manage'))return
  const u=state.users.find(x=>String(x.id)===String(id));if(!u)return;
  const perms=Array.isArray(state.permissions)?state.permissions:[]; const checked=new Set(Array.isArray(u.permissions)?u.permissions:[]); const isAdmin=u.login==='admin'; const safe=String(id).replace(/[^A-Za-z0-9_-]/g,'_');
- const ph=perms.map(p=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid #eef0f3"><input type="checkbox" class="user-perm" value="${esc(p.key)}" ${checked.has(p.key)?'checked':''} ${isAdmin?'disabled':''} style="width:auto"><span><b>${esc(p.name)}</b><br><code>${esc(p.key)}</code></span></label>`).join('');
- document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Управление пользователем</h2><div class="muted">Изменение данных, пароля и прав доступа</div></div><button class="close" onclick="closeModal()">×</button></div><div class="form-grid"><label>Название<input id="eu_name_${safe}" value="${esc(u.name||'')}"></label><label>Логин<input id="eu_login_${safe}" value="${esc(u.login||'')}"></label><label>Новый пароль<input id="eu_password_${safe}" type="password" value="" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять"></label><label>Группа<input id="eu_group_${safe}" value="${esc(u.group||'')}"></label><label>Статус<select id="eu_status_${safe}"><option value="Активен" ${u.status==='Активен'?'selected':''}>Активен</option><option value="Неактивен" ${u.status!=='Активен'?'selected':''}>Неактивен</option></select></label></div><div class="card" style="margin-top:16px"><h3 style="margin-top:0">Права доступа (${perms.length})</h3>${isAdmin?'':'<div style="display:flex;gap:8px;margin-bottom:10px"><button type="button" class="btn small" onclick="setUserPermissionSelection(\'userPermList_'+safe+'\',\'.user-perm\',true)">Выбрать все</button><button type="button" class="btn small" onclick="setUserPermissionSelection(\'userPermList_'+safe+'\',\'.user-perm\',false)">Снять все</button></div>'}<div id="userPermList_${safe}" style="max-height:320px;overflow:auto">${ph||'<div class="muted">Права ещё не созданы.</div>'}</div>${isAdmin?'<div class="muted" style="margin-top:10px">Администратор имеет все права.</div>':''}</div><div class="form-actions"><button class="btn danger" onclick='deleteUser(${JSON.stringify(String(u.id))})' ${isAdmin?'disabled':''}>Удалить</button><span style="flex:1"></span><button class="btn" onclick="closeModal()">Отмена</button><button class="btn primary" onclick='saveEditedUser(${JSON.stringify(String(u.id))})'>Сохранить</button></div>`;openModal();
+ const ph=renderPermissionTabs('userPermList_'+safe,perms,checked,'user-perm',isAdmin);
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Управление пользователем</h2><div class="muted">Изменение данных, пароля и прав доступа</div></div><button class="close" onclick="closeModal()">×</button></div><div class="form-grid"><label>Название<input id="eu_name_${safe}" value="${esc(u.name||'')}"></label><label>Логин<input id="eu_login_${safe}" value="${esc(u.login||'')}"></label><label>Новый пароль<input id="eu_password_${safe}" type="password" value="" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять"></label><label>Группа<input id="eu_group_${safe}" value="${esc(u.group||'')}"></label><label>Статус<select id="eu_status_${safe}"><option value="Активен" ${u.status==='Активен'?'selected':''}>Активен</option><option value="Неактивен" ${u.status!=='Активен'?'selected':''}>Неактивен</option></select></label></div><div class="card" style="margin-top:16px"><h3 style="margin-top:0">Права доступа (${perms.length})</h3>${isAdmin?'':'<div style="display:flex;gap:8px;margin-bottom:10px"><button type="button" class="btn small" onclick="setUserPermissionSelection(\'userPermList_'+safe+'\',\'.user-perm\',true)">Выбрать все</button><button type="button" class="btn small" onclick="setUserPermissionSelection(\'userPermList_'+safe+'\',\'.user-perm\',false)">Снять все</button></div>'}${ph||'<div class="muted">Права ещё не созданы.</div>'}${isAdmin?'<div class="muted" style="margin-top:10px">Администратор имеет все права.</div>':''}</div><div class="form-actions"><button class="btn danger" onclick='deleteUser(${JSON.stringify(String(u.id))})' ${isAdmin?'disabled':''}>Удалить</button><span style="flex:1"></span><button class="btn" onclick="closeModal()">Отмена</button><button class="btn primary" onclick='saveEditedUser(${JSON.stringify(String(u.id))})'>Сохранить</button></div>`;openModal();
 }
 async function saveEditedUser(id){
  const u=state.users.find(x=>String(x.id)===String(id));if(!u)return;const safe=String(id).replace(/[^A-Za-z0-9_-]/g,'_');const name=document.getElementById('eu_name_'+safe)?.value.trim();const login=document.getElementById('eu_login_'+safe)?.value.trim().toLowerCase();const password=document.getElementById('eu_password_'+safe)?.value||'';const group=document.getElementById('eu_group_'+safe)?.value.trim()||'Сотрудники';const status=document.getElementById('eu_status_'+safe)?.value||'Активен';
