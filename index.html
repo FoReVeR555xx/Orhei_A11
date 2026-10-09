@@ -1045,16 +1045,17 @@ body.app-active { overflow:hidden !important; }
 .delivery-status-waiting td:last-child{border-right:2px solid rgba(245,158,11,.58)!important}
 .delivery-status-delivered td:last-child{border-right:2px solid rgba(16,185,129,.62)!important}
 .delivery-status-select{min-width:118px;max-width:132px;padding:7px 10px;border:1px solid var(--line,#d0d5dd);border-radius:9px;background:var(--card,#fff);color:var(--text,#344054);font:inherit;font-size:12px;font-weight:700;box-shadow:0 1px 2px rgba(16,24,40,.04);transition:border-color .15s,box-shadow .15s}
-.delivery-status-waiting .delivery-status-select{border:1.5px solid #f59e0b;background:transparent;color:#f59e0b;box-shadow:none}
-.delivery-status-delivered .delivery-status-select{border:1.5px solid #10b981;background:rgba(16,185,129,.07);color:#10b981;box-shadow:none}
+.delivery-status-waiting .delivery-status-select{border:1.5px solid #f59e0b;background:transparent;color:#f59e0b!important;-webkit-text-fill-color:#f59e0b;box-shadow:none;color-scheme:dark}
+.delivery-status-delivered .delivery-status-select{border:1.5px solid #10b981;background:transparent;color:#10b981!important;-webkit-text-fill-color:#10b981;box-shadow:none;color-scheme:dark}
 .delivery-status-select:focus{outline:none;box-shadow:0 0 0 3px rgba(59,130,246,.13)}
 .delivery-status-select:disabled{opacity:.8;cursor:not-allowed}
 .delivery-km-total{display:inline-flex;align-items:center;justify-content:center;min-width:48px;padding:5px 8px;border:1px solid var(--line,#d0d5dd);border-radius:8px;background:var(--card,#fff);color:var(--muted,#667085);font-size:11px;font-weight:800;white-space:nowrap}
 .delivery-km-total.has-km{border-color:rgba(5,150,105,.3);background:rgba(5,150,105,.08);color:#047857}
 .delivery-settings-toggle{display:flex;align-items:center;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
-.delivery-settings-toggle input{appearance:none;width:44px;height:26px;border-radius:99px;background:#d0d5dd;position:relative;cursor:pointer;flex:0 0 auto;transition:background .2s}
+.delivery-settings-toggle input{appearance:none;width:44px;height:26px;border-radius:99px;background:#dc2626!important;position:relative;cursor:pointer;flex:0 0 auto;transition:background .2s}
 .delivery-settings-toggle input:before{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0002;transition:transform .2s}
-.delivery-settings-toggle input:checked{background:#059669}
+.delivery-settings-toggle input:not(:checked){background:#dc2626!important}
+.delivery-settings-toggle input:checked{background:#16a34a!important}
 .delivery-settings-toggle input:checked:before{transform:translateX(18px)}
 .site-settings-card{background:linear-gradient(145deg,rgba(14,31,47,.98),rgba(8,20,32,.98))!important;border:1px solid rgba(87,151,201,.32)!important;color:#e7f1fb!important;box-shadow:0 12px 34px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.025)!important}
 .site-settings-card h3{color:#f0f7ff!important}
@@ -1083,7 +1084,9 @@ body.app-active { overflow:hidden !important; }
 .delivery-list-card .actions{display:flex;gap:5px;align-items:center;flex-wrap:nowrap;max-width:none;white-space:nowrap}
 .delivery-list-card .actions .btn{flex:0 0 auto;max-width:none;box-sizing:border-box;white-space:nowrap;overflow-wrap:normal}
 .delivery-list-card .delivery-status-select{box-sizing:border-box;background:transparent!important;appearance:auto;-webkit-appearance:auto}
-.delivery-list-card .delivery-status-waiting .delivery-status-select,.delivery-list-card .delivery-status-delivered .delivery-status-select{background:transparent!important}
+.delivery-list-card tr.delivery-status-waiting .delivery-status-select{background:transparent!important;color:#f59e0b!important;-webkit-text-fill-color:#f59e0b}
+.delivery-list-card tr.delivery-status-delivered .delivery-status-select{background:transparent!important;color:#10b981!important;-webkit-text-fill-color:#10b981}
+.delivery-list-card .delivery-status-select option{background:#0b1724;color:#eaf2fb}
 @media(max-width:700px){.delivery-list-card .table-wrap{max-width:100%!important;overflow-x:auto!important}.delivery-list-card .table-wrap td:last-child{min-width:0;max-width:none}.delivery-list-card .actions{max-width:none}.delivery-list-card .actions .btn{font-size:12px;padding:7px 10px}}
 </style>
 </head>
