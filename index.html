@@ -1010,7 +1010,19 @@ body.app-active { overflow:hidden !important; }
   .table-card .table-wrap td{white-space:nowrap!important;}
 }
 </style>
-<style id="delivery-category-styles">.delivery-unknown-row td{background:rgba(255,255,255,.025)!important}.delivery-unknown-category{color:#9fb3c8;font-weight:600}.delivery-unknown-question{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;margin-left:5px;border-radius:50%;border:1px solid rgba(248,113,113,.55);background:rgba(185,28,28,.16);color:#fca5a5;font-size:11px;font-weight:800;cursor:pointer;vertical-align:middle}.delivery-unknown-question:hover{background:rgba(185,28,28,.28);color:#fecaca}.delivery-unknown-action{display:none!important;}}.delivery-category-item{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.08)}.delivery-category-item:last-child{border-bottom:0}.delivery-category-product{min-width:0;color:#e5edf7;font-size:12px}.delivery-category-product small{display:block;color:#8fa3b8;font-size:10px;margin-top:2px}.delivery-category-select{width:100%;min-width:0}.delivery-category-new{margin-top:14px;padding:12px;border:1px solid rgba(255,255,255,.10);border-radius:9px;background:rgba(255,255,255,.025)}.delivery-report-preview{background:#e8ebef!important;color:#111827!important}.delivery-report-preview .delivery-report-sheet{background:#fff!important;color:#111827!important;display:inline-block;min-width:100%;box-shadow:0 1px 8px rgba(0,0,0,.18)}.delivery-report-preview table{border-collapse:collapse!important;background:#fff!important;color:#111827!important}.delivery-report-preview th,.delivery-report-preview td{background:#fff!important;color:#111827!important;border-color:#777!important}.delivery-report-preview td,.delivery-report-preview th{font-family:Arial,sans-serif!important}.delivery-report-preview table *{background:#fff!important;color:#111827!important;border-color:#777!important;text-shadow:none!important}.delivery-report-preview table{font-size:12px!important;line-height:1.25!important}</style></head>
+<style id="delivery-category-styles">.delivery-unknown-row td{background:rgba(255,255,255,.025)!important}.delivery-unknown-category{color:#9fb3c8;font-weight:600}.delivery-unknown-question{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;margin-left:5px;border-radius:50%;border:1px solid rgba(248,113,113,.55);background:rgba(185,28,28,.16);color:#fca5a5;font-size:11px;font-weight:800;cursor:pointer;vertical-align:middle}.delivery-unknown-question:hover{background:rgba(185,28,28,.28);color:#fecaca}.delivery-unknown-action{display:none!important;}}.delivery-category-item{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.08)}.delivery-category-item:last-child{border-bottom:0}.delivery-category-product{min-width:0;color:#e5edf7;font-size:12px}.delivery-category-product small{display:block;color:#8fa3b8;font-size:10px;margin-top:2px}.delivery-category-select{width:100%;min-width:0}.delivery-category-new{margin-top:14px;padding:12px;border:1px solid rgba(255,255,255,.10);border-radius:9px;background:rgba(255,255,255,.025)}.delivery-report-preview{background:#e8ebef!important;color:#111827!important}.delivery-report-preview .delivery-report-sheet{background:#fff!important;color:#111827!important;display:inline-block;min-width:100%;box-shadow:0 1px 8px rgba(0,0,0,.18)}.delivery-report-preview table{border-collapse:collapse!important;background:#fff!important;color:#111827!important}.delivery-report-preview th,.delivery-report-preview td{background:#fff!important;color:#111827!important;border-color:#777!important}.delivery-report-preview td,.delivery-report-preview th{font-family:Arial,sans-serif!important}.delivery-report-preview table *{background:#fff!important;color:#111827!important;border-color:#777!important;text-shadow:none!important}.delivery-report-preview table{font-size:12px!important;line-height:1.25!important}</style><style id="delivery-status-styles">
+.delivery-status-waiting td{border-top:2px solid #f59e0b!important;border-bottom:2px solid #f59e0b!important;background:rgba(245,158,11,.055)!important}
+.delivery-status-waiting td:first-child{border-left:2px solid #f59e0b!important}
+.delivery-status-waiting td:last-child{border-right:2px solid #f59e0b!important}
+.delivery-status-delivered td{border-top:2px solid #22c55e!important;border-bottom:2px solid #22c55e!important;background:rgba(34,197,94,.055)!important}
+.delivery-status-delivered td:first-child{border-left:2px solid #22c55e!important}
+.delivery-status-delivered td:last-child{border-right:2px solid #22c55e!important}
+.delivery-status-select{min-width:145px;padding:7px 9px;border:1px solid #64748b;border-radius:8px;background:var(--surface,#fff);color:inherit;font:inherit;font-size:12px}
+.delivery-status-waiting .delivery-status-select{border-color:#f59e0b}
+.delivery-status-delivered .delivery-status-select{border-color:#22c55e}
+.delivery-status-select:disabled{opacity:.8;cursor:not-allowed}
+</style>
+</head>
 <body>
 <div id="login" class="login">
   <div class="login-glow login-glow-one"></div>
@@ -1133,8 +1145,19 @@ function cloudEmail(login){ return String(login||'').trim().toLowerCase()+'@bomb
 function cloudSafeState(){
   const clean=JSON.parse(JSON.stringify(state));
   delete clean.user;
-  if(Array.isArray(clean.users)) clean.users=clean.users.map(({password,...u})=>u);
+  // Normalized tables are authoritative for users, services and deliveries.
+  delete clean.users;
+  delete clean.services;
+  delete clean.deliveries;
   return clean;
+}
+let lastCloudServicesJson=null;
+let lastCloudOrdersJson=null;
+function cloudTimestamp(value){
+  let d;
+  if(typeof value==='number' || /^\d+$/.test(String(value??''))) d=new Date(Number(value));
+  else d=new Date(value||Date.now());
+  return Number.isNaN(d.getTime())?new Date().toISOString():d.toISOString();
 }
 async function loadCloudState(){
   if(!supabaseClient) return false;
@@ -1142,34 +1165,103 @@ async function loadCloudState(){
   if(error) throw error;
   if(data?.payload && Object.keys(data.payload).length){
     const p=data.payload;
-    ['services','deliveries','sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','users','groups','permissions'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
-    cloudReady=true; return true;
+    ['sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','groups','permissions'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
+    return true;
   }
   return false;
 }
+async function loadCloudCollections(){
+  if(!supabaseClient) return false;
+  const [serviceResult,orderResult]=await Promise.all([
+    supabaseClient.from('services').select('id,service_number,created_by,created_at,updated_at,payload').order('created_at',{ascending:false}),
+    supabaseClient.from('orders').select('id,order_number,status,created_by,created_at,updated_at,payload').order('created_at',{ascending:false})
+  ]);
+  if(serviceResult.error) throw serviceResult.error;
+  if(orderResult.error) throw orderResult.error;
+  state.services=(serviceResult.data||[]).map(row=>{
+    const item=row.payload&&typeof row.payload==='object'?row.payload:{};
+    return {...item,id:item.id!==undefined?item.id:row.id};
+  });
+  state.deliveries=(orderResult.data||[]).map(row=>{
+    const item=row.payload&&typeof row.payload==='object'?row.payload:{};
+    return {...item,id:item.id!==undefined?item.id:row.id,status:row.status||item.status||'Ожидает'};
+  });
+  lastCloudServicesJson=JSON.stringify(state.services);
+  lastCloudOrdersJson=JSON.stringify(state.deliveries);
+  cloudReady=true;
+  return true;
+}
 async function syncCloudProfiles(){
   if(!supabaseClient) return;
-  const {data,error}=await supabaseClient.from('profiles').select('id,login,display_name,group_name,status,permissions,created_at,updated_at');
-  if(error) { console.warn('Supabase profiles load failed',error); return; }
-  const profiles=Array.isArray(data)?data:[];
-  const byLogin=new Map(profiles.map(x=>[String(x.login||'').toLowerCase(),x]));
-  state.users=(state.users||[]).map(u=>{
-    const pr=byLogin.get(String(u.login||'').toLowerCase());
-    if(!pr) return u;
-    return {...u,id:pr.id,name:pr.display_name||u.name,group:pr.group_name||u.group,status:pr.status||u.status,permissions:Array.isArray(pr.permissions)?pr.permissions:(u.permissions||[]),created:u.created||String(pr.created_at||'').slice(0,10)};
+  const {data,error}=await supabaseClient.from('profiles').select('id,login,display_name,group_name,status,permissions,created_at,updated_at').order('login');
+  if(error) { console.warn('Supabase profiles load failed',error); throw error; }
+  const previous=Array.isArray(state.users)?state.users:[];
+  state.users=(Array.isArray(data)?data:[]).map(pr=>{
+    const old=previous.find(x=>String(x.login||'').toLowerCase()===String(pr.login||'').toLowerCase());
+    return {
+      id:pr.id,
+      login:pr.login,
+      name:pr.display_name||pr.login,
+      group:pr.group_name||'Сотрудники',
+      status:pr.status||'Активен',
+      permissions:Array.isArray(pr.permissions)?pr.permissions:[],
+      created:old?.created||String(pr.created_at||'').slice(0,10),
+      last:old?.last||'—'
+    };
   });
-  profiles.forEach(pr=>{
-    if(!state.users.some(u=>String(u.login||'').toLowerCase()===String(pr.login||'').toLowerCase())){
-      state.users.push({id:pr.id,name:pr.display_name||pr.login,login:pr.login,group:pr.group_name||'Сотрудники',status:pr.status||'Активен',permissions:Array.isArray(pr.permissions)?pr.permissions:[],created:String(pr.created_at||'').slice(0,10),last:'—'});
+}
+async function persistNormalizedCollection(table,items,kind,previousJson){
+  const currentJson=JSON.stringify(items||[]);
+  if(currentJson===previousJson) return previousJson;
+  const now=new Date().toISOString();
+  const rows=(items||[]).map(item=>{
+    const id=String(item.id);
+    if(kind==='order'){
+      const status=item.status==='Доставлен'?'Доставлен':'Ожидает';
+      return {
+        id,
+        order_number:String(item.number||item.requestNo||item.order_number||id),
+        status,
+        created_by:item.createdBy?String(item.createdBy):null,
+        created_at:cloudTimestamp(item.createdAt||item.created_at),
+        updated_at:now,
+        payload:{...item,id:item.id,status}
+      };
     }
+    return {
+      id,
+      service_number:String(item.number||item.service_number||id),
+      created_by:item.createdBy?String(item.createdBy):null,
+      created_at:cloudTimestamp(item.createdAt||item.created_at),
+      updated_at:now,
+      payload:item
+    };
   });
+  if(rows.length){
+    const {error}=await supabaseClient.from(table).upsert(rows,{onConflict:'id'});
+    if(error) throw error;
+  }
+  const {data:existing,error:selectError}=await supabaseClient.from(table).select('id');
+  if(selectError) throw selectError;
+  const keep=new Set(rows.map(row=>String(row.id)));
+  for(const row of (existing||[])){
+    if(!keep.has(String(row.id))){
+      const {error}=await supabaseClient.from(table).delete().eq('id',row.id);
+      if(error) throw error;
+    }
+  }
+  return currentJson;
 }
 async function pushCloudStateNow(){
   if(!supabaseClient || !cloudReady) return false;
   const {data:{user}}=await supabaseClient.auth.getUser();
   if(!user) return false;
+  const servicesJson=await persistNormalizedCollection('services',state.services||[],'service',lastCloudServicesJson);
+  const ordersJson=await persistNormalizedCollection('orders',state.deliveries||[],'order',lastCloudOrdersJson);
   const {error}=await supabaseClient.from('app_state').upsert({id:CLOUD_STATE_ID,payload:cloudSafeState(),updated_at:new Date().toISOString(),updated_by:user.id});
   if(error){ console.error('Supabase save failed',error); throw error; }
+  lastCloudServicesJson=servicesJson;
+  lastCloudOrdersJson=ordersJson;
   return true;
 }
 function pushCloudState(){
@@ -1226,9 +1318,15 @@ async function login(e){
    if(error) throw error;
    const cloudUser=data.user;
    const hadCloud=await loadCloudState();
+   await loadCloudCollections();
    await syncCloudProfiles();
-   if(!hadCloud){ cloudReady=true; await pushCloudState(); }
-   let found=(state.users||[]).find(x=>x.login===u);
+   let found=(state.users||[]).find(x=>String(x.login||'').toLowerCase()===u.toLowerCase());
+   if(found && found.status==='Неактивен'){
+     await supabaseClient.auth.signOut();
+     alert('Эта учётная запись отключена администратором.');
+     return;
+   }
+   if(!hadCloud){ await pushCloudStateNow(); }
    const meta=cloudUser.user_metadata||{};
    state.user={...(found||{}),id:found?.id||cloudUser.id,name:found?.name||meta.display_name||u,login:u,group:found?.group||meta.group_name||'Сотрудник',permissions:found?.permissions||meta.permissions||[]};
    setAccountBackground(u);
@@ -1242,7 +1340,7 @@ async function login(e){
    document.querySelectorAll('.restricted-work').forEach(b=>b.style.display=['admin','Haier','Bosch'].includes(u)?'':'none');
    log('Вход в систему','Авторизация');
    navigate('service');
- }catch(err){ console.error(err); alert('Неверный логин или пароль.'); }
+ }catch(err){ console.error(err); alert('Не удалось войти или загрузить данные Supabase: '+(err?.message||'проверьте логин, пароль и доступ к базе.')); }
 }
 async function logout(){
  document.querySelectorAll('.restricted-work').forEach(b=>b.style.display='none');
@@ -2131,7 +2229,18 @@ function filterDeliveries(){
  const q=(document.getElementById('deliverySearch')?.value||'').toLocaleLowerCase('ru-RU'),sort=document.getElementById('deliverySort')?.value;
  let a=state.deliveries.filter(d=>state.user.login==='admin'||d.createdBy===state.user.login).filter(d=>(JSON.stringify(d)+' '+deliveryCategoryDisplay(d)).toLocaleLowerCase('ru-RU').includes(q));
  a.sort((x,y)=>sort==='old'?x.createdAt-y.createdAt:y.createdAt-x.createdAt);
- document.getElementById('deliveryTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>Дата создания</th><th>Создатель</th><th>Категории товаров</th><th>Адрес</th><th></th></tr></thead><tbody>${a.map(d=>{const unknown=deliveryHasUnknownCategory(d);return `<tr${unknown?' class="delivery-unknown-row"':''}><td>${esc(d.dateTime||d.date||'')}</td><td>${esc(d.createdByName||d.createdBy||'')}</td><td><b class="${unknown?'delivery-unknown-category':''}">${esc(deliveryCategoryDisplay(d))}</b>${unknown&&deliveryCanAssignCategory()?` <button type="button" class="delivery-unknown-question" title="Указать категорию" onclick="openDeliveryCategoryModal(${d.id})">?</button>`:''}</td><td>${esc(d.recipientAddress||'')}</td><td><div class="actions"><button class="btn small" onclick="openDeliveryDoc(${d.id})">Открыть документ</button>${can('delivery.send')?'<button class="btn small primary" onclick="sendDeliveryDoc('+d.id+')">Отправить</button>':''}${can('delivery.delete')?'<button id="deleteDeliveryBtn_'+d.id+'" class="btn small delete-timer" onclick="startDeliveryDeleteTimer('+d.id+')">Удалить</button>':''}</div></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">Доставок пока нет</div>'
+ document.getElementById('deliveryTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>Дата создания</th><th>Создатель</th><th>Категории товаров</th><th>Адрес</th><th>Статус доставки</th><th></th></tr></thead><tbody>${a.map(d=>{const unknown=deliveryHasUnknownCategory(d),status=d.status==='Доставлен'?'Доставлен':'Ожидает',rowClass=(unknown?'delivery-unknown-row ':'')+(status==='Доставлен'?'delivery-status-delivered':'delivery-status-waiting');return `<tr class="${rowClass}"><td>${esc(d.dateTime||d.date||'')}</td><td>${esc(d.createdByName||d.createdBy||'')}</td><td><b class="${unknown?'delivery-unknown-category':''}">${esc(deliveryCategoryDisplay(d))}</b>${unknown&&deliveryCanAssignCategory()?` <button type="button" class="delivery-unknown-question" title="Указать категорию" onclick="openDeliveryCategoryModal(${d.id})">?</button>`:''}</td><td>${esc(d.recipientAddress||'')}</td><td><select class="delivery-status-select" aria-label="Статус доставки" ${can('delivery.send')?'':'disabled'} onchange="updateDeliveryStatus('${esc(String(d.id))}',this.value)"><option value="Ожидает" ${status==='Ожидает'?'selected':''}>⏳ Ожидает</option><option value="Доставлен" ${status==='Доставлен'?'selected':''}>✓ Доставлен</option></select></td><td><div class="actions"><button class="btn small" onclick="openDeliveryDoc(${d.id})">Открыть документ</button>${can('delivery.send')?'<button class="btn small primary" onclick="sendDeliveryDoc('+d.id+')">Отправить</button>':''}${can('delivery.delete')?'<button id="deleteDeliveryBtn_'+d.id+'" class="btn small delete-timer" onclick="startDeliveryDeleteTimer('+d.id+')">Удалить</button>':''}</div></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">Доставок пока нет</div>'
+}
+function updateDeliveryStatus(id,status){
+ if(!can('delivery.send')){alert('Недостаточно прав для изменения статуса доставки.');return}
+ const delivery=state.deliveries.find(x=>String(x.id)===String(id));
+ if(!delivery)return;
+ const next=status==='Доставлен'?'Доставлен':'Ожидает';
+ if((delivery.status||'Ожидает')===next)return;
+ const previous=delivery.status||'Ожидает';
+ delivery.status=next;
+ log('Изменение статуса доставки',delivery.number||delivery.requestNo||id,'',`${previous} → ${next}`);
+ filterDeliveries();
 }
 function deliveryCargoRowHtml(i,visible=i===1){
  const removeBtn=i>1?`<button type="button" class="btn small delivery-remove-row" onclick="removeDeliveryCargoRow(${i})">− Убрать ряд</button>`:'';
@@ -2317,6 +2426,7 @@ function createDelivery(e,isIndividual=false){
  let total=0;
  const d={
    id,number,requestNo:number,
+   status:'Ожидает',
    deliveryType:isIndividual?'individual':'standard',
    recipientAddress:String(f.get('recipientAddress')||'').trim(),
    recipientFio:String(f.get('recipientFio')||'').trim(),

@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
       String(caller.email || '').split('@')[0]
 
     const isAdmin =
-      callerLogin === 'admin' &&
+      String(callerLogin).toLowerCase() === 'admin' &&
       callerProfile?.status !== 'Неактивен'
 
     if (!isAdmin) {
