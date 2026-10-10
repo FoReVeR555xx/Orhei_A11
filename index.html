@@ -1391,14 +1391,7 @@ function save(){localStorage.setItem('av_services',JSON.stringify(state.services
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function num(v){return Number(String(v??'').replace(/\s/g,'').replace(',','.'))||0}
 function log(action,object,service='',details=''){state.logs.unshift({id:Date.now(),user:state.user?.name||'Система',action,object,service,details,date:new Date().toLocaleString('ru-RU')});save()}
-function can(p){
- if(state.user?.login==='admin')return true;
- const direct=Array.isArray(state.user?.permissions)?state.user.permissions:[];
- const groupName=String(state.user?.group||'').trim().toLocaleLowerCase('ru-RU');
- const group=Array.isArray(state.groups)?state.groups.find(g=>String(g?.name||'').trim().toLocaleLowerCase('ru-RU')===groupName):null;
- const groupPermissions=Array.isArray(group?.permissions)?group.permissions:[];
- return direct.includes(p)||groupPermissions.includes(p);
-}
+function can(p){return state.user?.login==='admin' || (state.user?.permissions||[]).includes(p)}
 function isSiteOwner(){return state.user?.login==='admin'||String(state.user?.group||'').toLocaleLowerCase('ru-RU')==='владельцы'}
 function siteSettings(){if(!state.siteSettings||typeof state.siteSettings!=='object')state.siteSettings={requireDeliveryCategories:false,deliveryNotificationsEnabled:true};if(state.siteSettings.requireDeliveryCategories===undefined)state.siteSettings.requireDeliveryCategories=false;if(state.siteSettings.deliveryNotificationsEnabled===undefined)state.siteSettings.deliveryNotificationsEnabled=true;return state.siteSettings}
 const PAGE_PERMISSION={service:'service.view',delivery:'delivery.view',sales:'sales.view',wallet:'wallet.view',archive:'archive.view',logs:'logs.view',permissions:'permissions.view',groups:'groups.view',users:'users.view',template:'template.view',deliveryTemplate:'deliveryTemplate.view',decoding:'decoding.view',reportBinding:'reportBinding.view',settings:'settings.view'};
