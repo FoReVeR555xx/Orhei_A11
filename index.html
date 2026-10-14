@@ -657,21 +657,31 @@ body:has(#login.hidden) { overflow:hidden !important; }
 
 
 /* Event board and owner editor */
-.event-empty-wrap{width:100%;max-width:1400px;margin:0 auto;border-radius:14px;overflow:hidden;background:#160607;box-shadow:0 12px 38px #0002}
+.event-empty-wrap{width:100%;max-width:1500px;margin:0 auto;border-radius:16px;overflow:hidden;background:#160607;box-shadow:0 18px 55px #0005}
 .event-empty-wrap img{display:block;width:100%;height:auto}
 .event-admin-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(290px,1fr);gap:18px;align-items:start}
-.event-board{position:relative;width:100%;aspect-ratio:1645/900;background:#170303 center/100% 100% no-repeat;border-radius:12px;overflow:hidden;box-shadow:0 12px 38px #0003}
-.event-prize-slot{position:absolute;top:8.5%;height:24%;width:18.2%;border:2px dashed #ffd65a88;border-radius:18px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#22000030;cursor:pointer;color:#fff;font-size:12px;text-align:center}
-.event-prize-slot:nth-child(1){left:34.1%}.event-prize-slot:nth-child(2){left:53.4%}.event-prize-slot:nth-child(3){left:72.6%}
-.event-prize-slot img{width:100%;height:100%;object-fit:contain;background:#25000066}
+.event-settings-screen{margin:-28px -30px;padding:28px 30px 34px;min-height:calc(100vh - 66px);background:radial-gradient(ellipse at 55% 0%,#64100d 0%,#250505 52%,#100204 100%);color:#fff}
+.event-settings-screen .page-head h1,.event-settings-screen .page-head .muted{color:#fff}
+.event-board{position:relative;width:100%;aspect-ratio:1670/942;background:#170303 center/100% 100% no-repeat;border-radius:14px;overflow:hidden;box-shadow:0 18px 50px #0008;isolation:isolate}
+.event-board-live{width:100%;max-width:1500px;margin:0 auto;border:1px solid #f7c85b88;box-shadow:0 20px 65px #0009,0 0 0 1px #8f4d1266}
+.event-prize-slot{position:absolute;top:8.7%;height:22.5%;width:15.1%;border:0;border-radius:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:transparent;cursor:pointer;color:#fff;font-size:12px;text-align:center;padding:0;box-sizing:border-box}
+.event-prize-slot:nth-child(1){left:34.9%}.event-prize-slot:nth-child(2){left:54.35%}.event-prize-slot:nth-child(3){left:73.05%}
+.event-prize-slot img{display:block;width:100%;height:100%;object-fit:cover;object-position:center;background:transparent}
 .event-prize-slot input{display:none}
-.event-value-field{position:absolute;min-width:2%;min-height:3%;padding:1px 3px;border:1px solid #ffe07a88;border-radius:6px;background:#14000030;color:#fff;font-weight:800;font-size:clamp(8px,1.25vw,18px);line-height:1.05;text-align:center;overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer;text-shadow:0 1px 3px #000}
+.event-prize-slot:not(:has(img)){background:#39000022;outline:2px dashed #ffd65aaa;outline-offset:-3px}
+.event-value-field{position:absolute;min-width:2%;min-height:3%;padding:1px 3px;border:1px solid #ffe07a66;border-radius:5px;background:#14000020;color:#fff;font-weight:800;font-size:clamp(8px,1.05vw,17px);line-height:1.05;text-align:center;overflow:hidden;display:flex;align-items:center;justify-content:center;box-sizing:border-box;cursor:pointer;text-shadow:0 1px 3px #000;white-space:nowrap}
 .event-value-field.selected{outline:2px solid #fff;box-shadow:0 0 0 3px #ffb30088}
-.event-editor-card{padding:16px;border:1px solid var(--border,#ddd);border-radius:12px;background:var(--card,#fff)}
-.event-editor-card h3{margin:0 0 12px}.event-form-row{display:flex;flex-direction:column;gap:6px;margin:10px 0}.event-form-row label{font-size:13px;font-weight:650}.event-form-row input,.event-form-row select,.event-form-row textarea{width:100%;min-width:0;padding:9px 10px;border:1px solid #bbb;border-radius:8px;background:var(--input-bg,#fff);color:var(--text,#222)}
-.event-form-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.event-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;background:#f1f1f1;color:#333}.event-status.active{background:#dcfce7;color:#166534}
-.event-admin-help{font-size:12px;color:var(--muted,#777);line-height:1.5;margin-top:10px}
-@media(max-width:900px){.event-admin-layout{grid-template-columns:1fr}.event-value-field{font-size:clamp(7px,2vw,14px)}.event-prize-slot{font-size:9px}}
+.event-board:not(.event-board-editable) .event-value-field{border-color:transparent;background:transparent;cursor:default}
+.event-board:not(.event-board-editable) .event-prize-slot{cursor:default}
+.event-editor-card{padding:16px;border:1px solid #ffd16a55;border-radius:14px;background:linear-gradient(145deg,rgba(69,8,7,.94),rgba(24,2,3,.94));box-shadow:0 12px 30px #0003;color:#fff}
+.event-editor-card h3{margin:0 0 12px;color:#ffe5a1}.event-form-row{display:flex;flex-direction:column;gap:6px;margin:10px 0}.event-form-row label{font-size:13px;font-weight:650;color:#ffe5c2}.event-form-row input,.event-form-row select,.event-form-row textarea{width:100%;min-width:0;padding:9px 10px;border:1px solid #8c5b50;border-radius:8px;background:#fff8f1;color:#25100d}
+.event-form-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.event-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;background:#fff0d5;color:#612014}.event-status.active{background:#dcfce7;color:#166534}
+.event-admin-help{font-size:12px;color:#f3d8c9;line-height:1.5;margin-top:10px}.event-admin-help code{color:#ffe9a5}
+.event-live-shell{width:100%;max-width:1500px;margin:0 auto;padding:0 0 18px}
+.event-live-intro{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding:13px 16px;border-radius:12px;background:linear-gradient(100deg,#300403,#65100d);border:1px solid #f8c75b66;color:#fff;box-shadow:0 8px 24px #0002}
+.event-live-intro h1{margin:0;font-size:clamp(20px,2.4vw,30px);color:#fff}.event-live-intro .muted{color:#f8d8c5}
+@media(max-width:900px){.event-admin-layout{grid-template-columns:1fr}.event-value-field{font-size:clamp(7px,1.6vw,14px)}.event-prize-slot{font-size:9px}.event-settings-screen{margin:-20px;padding:20px 12px 28px}.event-live-intro{align-items:flex-start;flex-direction:column}}
+@media(max-width:700px){.event-board{border-radius:8px}.event-value-field{padding:0 1px;font-size:clamp(6px,1.8vw,10px)}.event-prize-slot:not(:has(img)){outline-width:1px}.event-live-intro{padding:11px}}
 
 </style>
 
@@ -3106,18 +3116,18 @@ setInterval(()=>{if(!document.hidden)checkDeliveryNotifications()},30000);
 
 // ---- Мероприятие: безопасный редактор фона, призов и показателей кошелька ----
 const EVENT_BOARD_FIELDS = [
- {id:'top1a',label:'Верхняя рамка 1 — показатель слева',x:38.5,y:37.7,w:4.1,h:4.8},
- {id:'top1b',label:'Верхняя рамка 1 — показатель справа',x:48.9,y:37.7,w:4.1,h:4.8},
- {id:'top2a',label:'Верхняя рамка 2 — показатель слева',x:57.8,y:37.7,w:4.1,h:4.8},
- {id:'top2b',label:'Верхняя рамка 2 — показатель справа',x:68.2,y:37.7,w:4.1,h:4.8},
- {id:'top3a',label:'Верхняя рамка 3 — показатель слева',x:77.1,y:37.7,w:4.1,h:4.8},
- {id:'top3b',label:'Верхняя рамка 3 — показатель справа',x:87.5,y:37.7,w:4.1,h:4.8},
- {id:'green1',label:'Зелёная полоса — показатель слева',x:53.4,y:53.5,w:9.2,h:5.7},
- {id:'green2',label:'Зелёная полоса — показатель справа',x:70.0,y:53.5,w:8.5,h:5.7},
- {id:'haier1',label:'Haier — верхний показатель',x:51.5,y:70.8,w:5.9,h:5.4},
- {id:'haier2',label:'Haier — нижний показатель',x:38.5,y:80.2,w:18.5,h:5.8},
- {id:'bosch1',label:'Bosch — верхний показатель',x:87.1,y:70.8,w:5.9,h:5.4},
- {id:'bosch2',label:'Bosch — нижний показатель',x:64.0,y:80.2,w:24.2,h:5.8}
+ {id:'top1a',label:'Верхняя рамка 1 — показатель слева',x:37.6,y:36.5,w:4.25,h:4.25},
+ {id:'top1b',label:'Верхняя рамка 1 — показатель справа',x:46.7,y:36.5,w:4.0,h:4.25},
+ {id:'top2a',label:'Верхняя рамка 2 — показатель слева',x:56.9,y:36.5,w:4.3,h:4.25},
+ {id:'top2b',label:'Верхняя рамка 2 — показатель справа',x:66.1,y:36.5,w:3.9,h:4.25},
+ {id:'top3a',label:'Верхняя рамка 3 — показатель слева',x:75.8,y:36.5,w:4.3,h:4.25},
+ {id:'top3b',label:'Верхняя рамка 3 — показатель справа',x:84.9,y:36.5,w:3.9,h:4.25},
+ {id:'green1',label:'Зелёная полоса — показатель слева',x:52.6,y:51.3,w:9.0,h:6.7},
+ {id:'green2',label:'Зелёная полоса — показатель справа',x:69.0,y:51.3,w:6.5,h:6.7},
+ {id:'haier1',label:'Haier — верхний показатель',x:50.6,y:67.5,w:6.2,h:5.7},
+ {id:'haier2',label:'Haier — нижний показатель',x:37.8,y:77.2,w:12.1,h:4.7},
+ {id:'bosch1',label:'Bosch — верхний показатель',x:84.1,y:67.4,w:6.6,h:5.7},
+ {id:'bosch2',label:'Bosch — нижний показатель',x:65.0,y:77.1,w:20.8,h:4.8}
 ];
 const EVENT_METRICS = [
  {value:'bonus',label:'Общий бонус (формула кошелька)'},
@@ -3137,8 +3147,8 @@ function eventConfig(){
 }
 function renderEvents(c){
  const cfg=eventConfig();
- if(!cfg.active){c.innerHTML='<div class="page-head"><div><h1>Мероприятия</h1><div class="muted">Специальные мероприятия и призы</div></div><span class="event-status">Мероприятие пока не активно</span></div><div class="event-empty-wrap"><img src="assets/event-empty.png" alt="Пока что заданий нет"></div>';return;}
- c.innerHTML='<div class="page-head"><div><h1>Мероприятия</h1><div class="muted">Текущие показатели и призы</div></div><span class="event-status active">Мероприятие активно</span></div>'+eventBoardMarkup(false);
+ if(!cfg.active){c.innerHTML='<div class="event-live-shell"><div class="event-live-intro"><div><h1>Мероприятия</h1><div class="muted">Специальные мероприятия и призы</div></div><span class="event-status">Пока не активно</span></div><div class="event-empty-wrap"><img src="assets/event-empty.png" alt="Пока что заданий нет"></div></div>';return;}
+ c.innerHTML='<div class="event-live-shell"><div class="event-live-intro"><div><h1>Мероприятия</h1><div class="muted">Ваши показатели и призы</div></div><span class="event-status active">Мероприятие активно</span></div>'+eventBoardMarkup(false).replace('class="event-board"','class="event-board event-board-live"')+'</div>';
 }
 function eventBoardMarkup(editable){
  const cfg=eventConfig();
@@ -3184,7 +3194,7 @@ function renderEventSettings(c){
  const cfg=eventConfig(),id=window.eventSelectedField||EVENT_BOARD_FIELDS[0].id,field=EVENT_BOARD_FIELDS.find(x=>x.id===id)||EVENT_BOARD_FIELDS[0],f=cfg.fields[id]||{mode:'individual',account:'Haier',metric:'bonus',formula:'value / 100 * 10',decimals:0};
  const metricOptions=EVENT_METRICS.map(m=>`<option value="${m.value}" ${f.metric===m.value?'selected':''}>${esc(m.label)}</option>`).join('');
  const preview=eventBoardMarkup(true);
- c.innerHTML=`<div class="page-head"><div><h1>Мероприятие</h1><div class="muted">Настройка призов и показателей на изображении. Сначала сохраните, затем активируйте.</div></div><span class="event-status ${cfg.active?'active':''}">${cfg.active?'Активно':'Не активировано'}</span></div>
+ c.innerHTML=`<div class="event-settings-screen"><div class="page-head"><div><h1>Мероприятие</h1><div class="muted">Настройка призов и показателей на фоне мероприятия. Сначала сохраните, затем активируйте.</div></div><span class="event-status ${cfg.active?'active':''}">${cfg.active?'Активно':'Не активировано'}</span></div>
  <div class="event-admin-layout"><div><div class="event-editor-card" style="margin-bottom:14px"><h3>Область мероприятия</h3>${preview}<div class="event-admin-help">Нажмите на любое поле с рамкой, чтобы настроить его. Нажмите на одну из трёх верхних рамок, чтобы загрузить изображение приза. Изображения автоматически уменьшаются для экономии места при синхронизации.</div></div>
  <div class="event-editor-card"><h3>Изображения призов</h3><div class="event-form-actions">${[0,1,2].map(i=>`<label class="btn small" style="cursor:pointer">${cfg.prizes[i]?'Заменить приз '+(i+1):'Загрузить приз '+(i+1)}<input type="file" accept="image/*" style="display:none" onchange="eventPrizeUpload(${i},this)"></label>${cfg.prizes[i]?`<button class="btn small" onclick="clearEventPrize(${i})">Убрать</button>`:''}`).join('')}</div></div></div>
  <div class="event-editor-card"><h3>Настройка поля</h3><div class="muted" style="font-size:13px">${esc(field.label)}</div>
@@ -3196,7 +3206,7 @@ function renderEventSettings(c){
  <div class="event-form-row"><label>Знаков после запятой</label><select id="eventDecimals" onchange="updateEventField('${id}','decimals',this.value)"><option value="0" ${Number(f.decimals||0)===0?'selected':''}>0</option><option value="1" ${Number(f.decimals)===1?'selected':''}>1</option><option value="2" ${Number(f.decimals)===2?'selected':''}>2</option><option value="3" ${Number(f.decimals)===3?'selected':''}>3</option><option value="4" ${Number(f.decimals)===4?'selected':''}>4</option></select></div>
  <div class="event-admin-help">Предпросмотр: <b>${esc(eventFormatValue(eventApplyFormula(eventMetricValue(f.mode==='common'?(f.account||'Haier'):eventCurrentAccount(),f.metric||'bonus'),f.formula||'value'),f))||'—'}</b><br>Поддерживаются числа, скобки и операции +, −, ×, ÷. Используйте <code>value</code> вместо значения кошелька.</div>
  <div class="event-form-actions"><button class="btn primary" onclick="saveEventSettings()">Сохранить настройки</button><button class="btn ${cfg.active?'danger':'primary'}" onclick="toggleEventActive()">${cfg.active?'Выключить мероприятие':'Активировать мероприятие'}</button></div>
- <div class="event-admin-help">Сохранение не включает мероприятие автоматически. Активация и выключение выполняются отдельно. Настройки сохраняются в общем состоянии сайта Supabase.</div></div></div>`;
+ <div class="event-admin-help">Сохранение не включает мероприятие автоматически. Активация и выключение выполняются отдельно. Настройки сохраняются в общем состоянии сайта Supabase.</div></div></div></div>`;
 }
 function updateEventField(id,key,value){const cfg=eventConfig();if(!cfg.fields[id])cfg.fields[id]={mode:'individual',account:'Haier',metric:'bonus',formula:'value / 100 * 10',decimals:0};cfg.fields[id][key]=key==='decimals'?Number(value):value;if(key==='mode'){renderEventSettings(document.getElementById('content'));return;}if(key==='account'||key==='metric'||key==='formula'||key==='decimals'){const active=document.activeElement;const pos=active&&typeof active.selectionStart==='number'?active.selectionStart:null;renderEventSettings(document.getElementById('content'));if(key==='formula'){const el=document.getElementById('eventFormula');if(el){el.focus();if(pos!==null)el.setSelectionRange(pos,pos);}}}}
 function setEventFormula(id,formula){updateEventField(id,'formula',formula);}
