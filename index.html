@@ -655,6 +655,24 @@ body:has(#login.hidden) { overflow:hidden !important; }
   .table-wrap thead th,.wallet-table-wrap thead th,.archive-view-table thead th{top:0}
 }
 
+
+/* Event board and owner editor */
+.event-empty-wrap{width:100%;max-width:1400px;margin:0 auto;border-radius:14px;overflow:hidden;background:#160607;box-shadow:0 12px 38px #0002}
+.event-empty-wrap img{display:block;width:100%;height:auto}
+.event-admin-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(290px,1fr);gap:18px;align-items:start}
+.event-board{position:relative;width:100%;aspect-ratio:1645/900;background:#170303 center/100% 100% no-repeat;border-radius:12px;overflow:hidden;box-shadow:0 12px 38px #0003}
+.event-prize-slot{position:absolute;top:8.5%;height:24%;width:18.2%;border:2px dashed #ffd65a88;border-radius:18px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#22000030;cursor:pointer;color:#fff;font-size:12px;text-align:center}
+.event-prize-slot:nth-child(1){left:34.1%}.event-prize-slot:nth-child(2){left:53.4%}.event-prize-slot:nth-child(3){left:72.6%}
+.event-prize-slot img{width:100%;height:100%;object-fit:contain;background:#25000066}
+.event-prize-slot input{display:none}
+.event-value-field{position:absolute;min-width:2%;min-height:3%;padding:1px 3px;border:1px solid #ffe07a88;border-radius:6px;background:#14000030;color:#fff;font-weight:800;font-size:clamp(8px,1.25vw,18px);line-height:1.05;text-align:center;overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer;text-shadow:0 1px 3px #000}
+.event-value-field.selected{outline:2px solid #fff;box-shadow:0 0 0 3px #ffb30088}
+.event-editor-card{padding:16px;border:1px solid var(--border,#ddd);border-radius:12px;background:var(--card,#fff)}
+.event-editor-card h3{margin:0 0 12px}.event-form-row{display:flex;flex-direction:column;gap:6px;margin:10px 0}.event-form-row label{font-size:13px;font-weight:650}.event-form-row input,.event-form-row select,.event-form-row textarea{width:100%;min-width:0;padding:9px 10px;border:1px solid #bbb;border-radius:8px;background:var(--input-bg,#fff);color:var(--text,#222)}
+.event-form-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.event-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;background:#f1f1f1;color:#333}.event-status.active{background:#dcfce7;color:#166534}
+.event-admin-help{font-size:12px;color:var(--muted,#777);line-height:1.5;margin-top:10px}
+@media(max-width:900px){.event-admin-layout{grid-template-columns:1fr}.event-value-field{font-size:clamp(7px,2vw,14px)}.event-prize-slot{font-size:9px}}
+
 </style>
 
 
@@ -1134,6 +1152,7 @@ body.app-active { overflow:hidden !important; }
     <button data-page="delivery">▱ &nbsp; Доставки</button>
     <button data-page="sales" class="restricted-work">▰ &nbsp; Продажа</button>
     <button data-page="wallet" class="restricted-work">▤ &nbsp; Кошелёк</button>
+    <button data-page="events">🎁 &nbsp; Мероприятия</button>
     <button data-page="archive" class="admin-only">▥ &nbsp; Архив</button>
     <div class="nav-title admin-only">Управление</div>
     <button data-page="logs" class="admin-only">◷ &nbsp; Логи</button>
@@ -1145,6 +1164,7 @@ body.app-active { overflow:hidden !important; }
     <button data-page="decoding" class="admin-only">⌘ &nbsp; Расшифровка</button>
     <button data-page="reportBinding" class="admin-only">↔ &nbsp; Привязка</button>
     <button data-page="settings" class="admin-only">⚙ &nbsp; Настройки сайта</button>
+    <button data-page="eventSettings" class="admin-only">🎉 &nbsp; Мероприятие</button>
   </div>
   <div class="sidebar-bottom"><div class="user-mini"><b id="sideName">Администратор</b><br><span id="sideRole">Владелец</span></div><button class="btn small" style="width:100%" onclick="logout()">Выйти</button></div>
 </aside>
@@ -1167,6 +1187,7 @@ let pdfjsLib = null;
 import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs").then(m=>{pdfjsLib=m; if(m.GlobalWorkerOptions) m.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs";}).catch(()=>{});
 const state = {
  user:null,
+ eventSettings: JSON.parse(localStorage.getItem('av_event_settings')||'null') || {active:false,prizes:['','',''],fields:{},updatedAt:null},
  siteSettings: JSON.parse(localStorage.getItem('av_site_settings')||'{"requireDeliveryCategories":false,"deliveryNotificationsEnabled":true}'),
  services: JSON.parse(localStorage.getItem('av_services')||'[]'),
  deliveries: JSON.parse(localStorage.getItem('av_deliveries')||'[]'),
@@ -1213,7 +1234,7 @@ const PERMISSION_CATALOG = [
  {key:'service.view',name:'Просмотр своих сервисов'}, {key:'service.view.all',name:'Просмотр сервисов всех пользователей'}, {key:'service.create',name:'Создание сервиса'}, {key:'service.print',name:'Печать сервиса'}, {key:'service.send',name:'Отправка сервиса'}, {key:'service.delete',name:'Удаление сервиса'}, {key:'template.manage',name:'Управление шаблоном сервиса'},
  {key:'delivery.view',name:'Просмотр своих доставок'}, {key:'delivery.view.all',name:'Просмотр доставок всех пользователей'}, {key:'delivery.create',name:'Создание доставки'}, {key:'delivery.create.individual',name:'Создание индивидуальной доставки'}, {key:'delivery.report',name:'Формирование отчётов по доставкам'}, {key:'delivery.category.assign',name:'Выбор категории товара для доставки'}, {key:'delivery.category.create',name:'Создание категории товара из доставки'}, {key:'delivery.category.manage',name:'Управление справочником категорий'}, {key:'delivery.print',name:'Печать доставки'}, {key:'delivery.send',name:'Отправка и изменение статуса доставки'}, {key:'delivery.delete',name:'Удаление доставки'}, {key:'delivery.delete.delivered',name:'Удаление доставленной доставки (дополнительное право)'}, {key:'delivery.notify.own',name:'Уведомления о своих доставках'}, {key:'delivery.notify.all',name:'Уведомления обо всех доставках'}, {key:'delivery.notify.immune',name:'Иммунитет к уведомлениям (не получать уведомления)'}, {key:'deliveryTemplate.manage',name:'Управление шаблоном доставки'}, {key:'decoding.manage',name:'Управление расшифровкой категорий'},
  {key:'sales.view',name:'Просмотр своих продаж'}, {key:'sales.view.all',name:'Просмотр продаж всех пользователей'}, {key:'sales.create',name:'Создание продажи'}, {key:'sales.edit',name:'Редактирование продаж'}, {key:'sales.delete',name:'Удаление своих продаж'}, {key:'sales.delete.all',name:'Удаление любых продаж'}, {key:'salesArchive.view',name:'Просмотр архива продаж'},
- {key:'wallet.view',name:'Просмотр кошелька'}, {key:'wallet.manage',name:'Управление кошельком'}, {key:'archive.view',name:'Просмотр архива'}, {key:'archive.manage',name:'Восстановление, удаление и очистка архива'}, {key:'logs.view',name:'Просмотр логов'},
+ {key:'wallet.view',name:'Просмотр кошелька'}, {key:'wallet.manage',name:'Управление кошельком'}, {key:'event.view',name:'Просмотр мероприятия'}, {key:'archive.view',name:'Просмотр архива'}, {key:'archive.manage',name:'Восстановление, удаление и очистка архива'}, {key:'logs.view',name:'Просмотр логов'},
  {key:'reportBinding.view',name:'Просмотр меню «Привязка»'}, {key:'reportBinding.manage',name:'Изменение привязок отчётов'}, {key:'users.view',name:'Просмотр меню «Пользователи»'}, {key:'users.manage',name:'Создание, изменение и удаление пользователей'}, {key:'groups.view',name:'Просмотр меню «Группы»'}, {key:'groups.manage',name:'Управление группами и их правами'}, {key:'permissions.view',name:'Просмотр меню «Права»'}, {key:'permissions.manage',name:'Управление каталогом прав'}, {key:'template.view',name:'Просмотр меню «Сервис — шаблон A4»'}, {key:'deliveryTemplate.view',name:'Просмотр меню «Доставки — шаблон A4»'}, {key:'decoding.view',name:'Просмотр меню «Расшифровка»'}, {key:'settings.view',name:'Просмотр меню «Настройки сайта»'}
 ];
 function ensurePermissionCatalog(){
@@ -1258,7 +1279,7 @@ async function loadCloudState(){
   if(error) throw error;
   if(data?.payload && Object.keys(data.payload).length){
     const p=data.payload;
-    ['sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','groups','permissions','siteSettings'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
+    ['sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','groups','permissions','siteSettings','eventSettings'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
     return true;
   }
   return false;
@@ -1387,7 +1408,7 @@ ensureFixedAccounts();
 if(!Array.isArray(state.deliveryCategories)) state.deliveryCategories=[];
 state.deliveries.forEach(d=>{if(d.showTotalCost===undefined)d.showTotalCost=!!(d.totalValue);if(d.express24===undefined)d.express24=false;if(!d.specialCondition&&d.specialConditions)d.specialCondition=d.specialConditions;if(d.recipientAddress===undefined)d.recipientAddress=d.recipientData1||'';if(d.recipientFio===undefined)d.recipientFio='';if(d.recipientPhone===undefined)d.recipientPhone='';for(let i=1;i<=6;i++){if(d['model'+i]===undefined)d['model'+i]=d['recipient'+i]||''}});
 state.users.forEach(u=>{if((u.login==='av'||u.login==='kbt')&&Array.isArray(u.permissions)){['delivery.view','delivery.create','delivery.print','delivery.send','delivery.delete'].forEach(p=>{if(!u.permissions.includes(p))u.permissions.push(p)})}});
-function save(){localStorage.setItem('av_services',JSON.stringify(state.services));localStorage.setItem('av_deliveries',JSON.stringify(state.deliveries));localStorage.setItem('av_sales',JSON.stringify(state.sales));localStorage.setItem('av_sales_archive',JSON.stringify(state.salesArchive||[]));localStorage.setItem('av_wallet_rows',JSON.stringify(state.walletRows));localStorage.setItem('av_wallet_archive',JSON.stringify(state.walletArchive||[]));localStorage.setItem('av_delivery_categories',JSON.stringify(state.deliveryCategories||[]));localStorage.setItem('av_delivery_report_bindings',JSON.stringify(state.reportBindings||{}));localStorage.setItem('av_site_settings',JSON.stringify(state.siteSettings||{requireDeliveryCategories:false,deliveryNotificationsEnabled:true}));localStorage.setItem('av_logs',JSON.stringify(state.logs));localStorage.setItem('av_users',JSON.stringify((state.users||[]).map(({password,...u})=>u)));localStorage.setItem('av_groups',JSON.stringify(state.groups));localStorage.setItem('av_permissions',JSON.stringify(state.permissions));pushCloudState()}
+function save(){localStorage.setItem('av_event_settings',JSON.stringify(state.eventSettings||{active:false,prizes:['','',''],fields:{}}));localStorage.setItem('av_services',JSON.stringify(state.services));localStorage.setItem('av_deliveries',JSON.stringify(state.deliveries));localStorage.setItem('av_sales',JSON.stringify(state.sales));localStorage.setItem('av_sales_archive',JSON.stringify(state.salesArchive||[]));localStorage.setItem('av_wallet_rows',JSON.stringify(state.walletRows));localStorage.setItem('av_wallet_archive',JSON.stringify(state.walletArchive||[]));localStorage.setItem('av_delivery_categories',JSON.stringify(state.deliveryCategories||[]));localStorage.setItem('av_delivery_report_bindings',JSON.stringify(state.reportBindings||{}));localStorage.setItem('av_site_settings',JSON.stringify(state.siteSettings||{requireDeliveryCategories:false,deliveryNotificationsEnabled:true}));localStorage.setItem('av_logs',JSON.stringify(state.logs));localStorage.setItem('av_users',JSON.stringify((state.users||[]).map(({password,...u})=>u)));localStorage.setItem('av_groups',JSON.stringify(state.groups));localStorage.setItem('av_permissions',JSON.stringify(state.permissions));pushCloudState()}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function num(v){return Number(String(v??'').replace(/\s/g,'').replace(',','.'))||0}
 function log(action,object,service='',details=''){state.logs.unshift({id:Date.now(),user:state.user?.name||'Система',action,object,service,details,date:new Date().toLocaleString('ru-RU')});save()}
@@ -1401,8 +1422,8 @@ function can(p){
 }
 function isSiteOwner(){return state.user?.login==='admin'||String(state.user?.group||'').toLocaleLowerCase('ru-RU')==='владельцы'}
 function siteSettings(){if(!state.siteSettings||typeof state.siteSettings!=='object')state.siteSettings={requireDeliveryCategories:false,deliveryNotificationsEnabled:true};if(state.siteSettings.requireDeliveryCategories===undefined)state.siteSettings.requireDeliveryCategories=false;if(state.siteSettings.deliveryNotificationsEnabled===undefined)state.siteSettings.deliveryNotificationsEnabled=true;return state.siteSettings}
-const PAGE_PERMISSION={service:'service.view',delivery:'delivery.view',sales:'sales.view',wallet:'wallet.view',archive:'archive.view',logs:'logs.view',permissions:'permissions.view',groups:'groups.view',users:'users.view',template:'template.view',deliveryTemplate:'deliveryTemplate.view',decoding:'decoding.view',reportBinding:'reportBinding.view',settings:'settings.view'};
-function refreshNavigationPermissions(){document.querySelectorAll('.nav button[data-page]').forEach(b=>{const required=PAGE_PERMISSION[b.dataset.page];b.style.display=(b.dataset.page==='settings'?isSiteOwner():(!required||can(required)||can(({permissions:'permissions.manage',groups:'groups.manage',users:'users.manage',template:'template.manage',deliveryTemplate:'deliveryTemplate.manage',decoding:'decoding.manage',reportBinding:'reportBinding.manage'})[b.dataset.page]||'__no_permission__'))) ?'flex':'none'});document.querySelectorAll('.nav-title.admin-only').forEach(x=>x.style.display=(isSiteOwner()||['logs.view','permissions.view','permissions.manage','groups.view','groups.manage','users.view','users.manage','template.view','template.manage','deliveryTemplate.view','deliveryTemplate.manage','decoding.view','decoding.manage','reportBinding.view','reportBinding.manage','archive.view'].some(can))?'':'none')}
+const PAGE_PERMISSION={events:'event.view',service:'service.view',delivery:'delivery.view',sales:'sales.view',wallet:'wallet.view',archive:'archive.view',logs:'logs.view',permissions:'permissions.view',groups:'groups.view',users:'users.view',template:'template.view',deliveryTemplate:'deliveryTemplate.view',decoding:'decoding.view',reportBinding:'reportBinding.view',settings:'settings.view'};
+function refreshNavigationPermissions(){document.querySelectorAll('.nav button[data-page]').forEach(b=>{const required=PAGE_PERMISSION[b.dataset.page];b.style.display=((b.dataset.page==='settings'||b.dataset.page==='eventSettings')?isSiteOwner():(!required||can(required)||can(({permissions:'permissions.manage',groups:'groups.manage',users:'users.manage',template:'template.manage',deliveryTemplate:'deliveryTemplate.manage',decoding:'decoding.manage',reportBinding:'reportBinding.manage'})[b.dataset.page]||'__no_permission__'))) ?'flex':'none'});document.querySelectorAll('.nav-title.admin-only').forEach(x=>x.style.display=(isSiteOwner()||['logs.view','permissions.view','permissions.manage','groups.view','groups.manage','users.view','users.manage','template.view','template.manage','deliveryTemplate.view','deliveryTemplate.manage','decoding.view','decoding.manage','reportBinding.view','reportBinding.manage','archive.view'].some(can))?'':'none')}
 function requirePermission(key){if(can(key))return true;alert('Недостаточно прав: '+key);return false}
 
 const ACCOUNT_BACKGROUNDS = {
@@ -1461,12 +1482,14 @@ async function logout(){
 }
 document.getElementById('loginForm').addEventListener('submit',login);
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));
-const titles={service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',decoding:'Расшифровка',reportBinding:'Привязка',settings:'Настройки сайта'};
+const titles={events:'Мероприятия',eventSettings:'Мероприятие',service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',decoding:'Расшифровка',reportBinding:'Привязка',settings:'Настройки сайта'};
 function navigate(page){const required=PAGE_PERMISSION[page];if(page==='settings'&&!isSiteOwner()){alert('Настройки сайта доступны только владельцу.');return}if(required&&!requirePermission(required))return;document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=titles[page];render(page);setTimeout(checkDeliveryNotifications,120)}
 function render(page){
  const c=document.getElementById('content');
  const required=PAGE_PERMISSION[page];if(page==='settings'&&!isSiteOwner()){c.innerHTML='<div class="empty">Настройки сайта доступны только владельцу.</div>';return;}if(required&&!can(required)){c.innerHTML='<div class="empty">Недостаточно прав для этого раздела.</div>';return;}
  if(page==='settings') return renderSiteSettings(c);
+ if(page==='events') return renderEvents(c);
+ if(page==='eventSettings') { if(!isSiteOwner()){c.innerHTML='<div class="empty">Настройки мероприятия доступны только владельцу.</div>';return;} return renderEventSettings(c); }
  if(page==='service') return renderService(c);
   if(page==='delivery') return renderDelivery(c);
   if(page==='reportBinding') return renderReportBinding(c);
@@ -3078,6 +3101,108 @@ setInterval(()=>{if(!document.hidden)checkDeliveryNotifications()},30000);
   document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>closeMobileNav()));
   window.addEventListener('resize',()=>{if(window.innerWidth>700)closeMobileNav()});
 })();
+
+
+
+// ---- Мероприятие: безопасный редактор фона, призов и показателей кошелька ----
+const EVENT_BOARD_FIELDS = [
+ {id:'top1a',label:'Верхняя рамка 1 — показатель слева',x:38.5,y:37.7,w:4.1,h:4.8},
+ {id:'top1b',label:'Верхняя рамка 1 — показатель справа',x:48.9,y:37.7,w:4.1,h:4.8},
+ {id:'top2a',label:'Верхняя рамка 2 — показатель слева',x:57.8,y:37.7,w:4.1,h:4.8},
+ {id:'top2b',label:'Верхняя рамка 2 — показатель справа',x:68.2,y:37.7,w:4.1,h:4.8},
+ {id:'top3a',label:'Верхняя рамка 3 — показатель слева',x:77.1,y:37.7,w:4.1,h:4.8},
+ {id:'top3b',label:'Верхняя рамка 3 — показатель справа',x:87.5,y:37.7,w:4.1,h:4.8},
+ {id:'green1',label:'Зелёная полоса — показатель слева',x:53.4,y:53.5,w:9.2,h:5.7},
+ {id:'green2',label:'Зелёная полоса — показатель справа',x:70.0,y:53.5,w:8.5,h:5.7},
+ {id:'haier1',label:'Haier — верхний показатель',x:51.5,y:70.8,w:5.9,h:5.4},
+ {id:'haier2',label:'Haier — нижний показатель',x:38.5,y:80.2,w:18.5,h:5.8},
+ {id:'bosch1',label:'Bosch — верхний показатель',x:87.1,y:70.8,w:5.9,h:5.4},
+ {id:'bosch2',label:'Bosch — нижний показатель',x:64.0,y:80.2,w:24.2,h:5.8}
+];
+const EVENT_METRICS = [
+ {value:'bonus',label:'Общий бонус (формула кошелька)'},
+ {value:'profit',label:'Прибыль'}, {value:'products',label:'Количество товаров'},
+ {value:'checks',label:'Количество чеков'}, {value:'avg',label:'Среднее количество товаров на чек'},
+ {value:'rank',label:'Ранг'}, {value:'receiptDuration',label:'Длительность чека'},
+ {value:'illiquid',label:'Неликвид'}, {value:'supplier',label:'Поставщик'},
+ {value:'services',label:'Услуги'}, {value:'dayTotal',label:'Итог дня'},
+ {value:'terminal',label:'Терминал'}, {value:'it',label:'IT'}, {value:'promotions',label:'Акции'}
+];
+function eventConfig(){
+ if(!state.eventSettings||typeof state.eventSettings!=='object')state.eventSettings={active:false,prizes:['','',''],fields:{},updatedAt:null};
+ if(!Array.isArray(state.eventSettings.prizes))state.eventSettings.prizes=['','',''];
+ while(state.eventSettings.prizes.length<3)state.eventSettings.prizes.push('');
+ if(!state.eventSettings.fields||typeof state.eventSettings.fields!=='object')state.eventSettings.fields={};
+ return state.eventSettings;
+}
+function renderEvents(c){
+ const cfg=eventConfig();
+ if(!cfg.active){c.innerHTML='<div class="page-head"><div><h1>Мероприятия</h1><div class="muted">Специальные мероприятия и призы</div></div><span class="event-status">Мероприятие пока не активно</span></div><div class="event-empty-wrap"><img src="assets/event-empty.png" alt="Пока что заданий нет"></div>';return;}
+ c.innerHTML='<div class="page-head"><div><h1>Мероприятия</h1><div class="muted">Текущие показатели и призы</div></div><span class="event-status active">Мероприятие активно</span></div>'+eventBoardMarkup(false);
+}
+function eventBoardMarkup(editable){
+ const cfg=eventConfig();
+ const prizes=cfg.prizes||[];
+ const prizeHtml=[0,1,2].map(i=>`<label class="event-prize-slot" title="${editable?'Загрузить изображение приза':'Приз '+(i+1)}">${prizes[i]?`<img src="${prizes[i]}" alt="Приз ${i+1}">`:(editable?'Нажмите, чтобы загрузить приз':'')}<input type="file" accept="image/*" ${editable?'':'disabled'} onchange="eventPrizeUpload(${i},this)"></label>`).join('');
+ const fieldHtml=EVENT_BOARD_FIELDS.map(f=>{const val=eventFieldValue(f.id);const conf=cfg.fields[f.id]||{};return `<div class="event-value-field ${editable&&window.eventSelectedField===f.id?'selected':''}" style="left:${f.x}%;top:${f.y}%;width:${f.w}%;height:${f.h}%" ${editable?`onclick="selectEventField('${f.id}')"`:''} title="${esc(f.label)}">${esc(val===null?'':eventFormatValue(val,conf))}</div>`}).join('');
+ return `<div class="event-board" style="background-image:url('assets/event-board.png')">${prizeHtml}${fieldHtml}</div>`;
+}
+function eventPrizeUpload(index,input){
+ if(!isSiteOwner()){alert('Изменять мероприятие может только владелец.');return;}
+ const file=input.files&&input.files[0];if(!file)return;
+ if(!file.type.startsWith('image/')){alert('Выберите файл изображения.');input.value='';return;}
+ const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const max=1000,scale=Math.min(1,max/Math.max(img.width,img.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,canvas.width,canvas.height);eventConfig().prizes[index]=canvas.toDataURL('image/jpeg',0.84);renderEventSettings(document.getElementById('content'));};img.onerror=()=>alert('Не удалось прочитать изображение.');img.src=reader.result;};reader.readAsDataURL(file);
+}
+window.eventSelectedField=EVENT_BOARD_FIELDS[0].id;
+function selectEventField(id){window.eventSelectedField=id;renderEventSettings(document.getElementById('content'));}
+function eventFieldValue(id){const f=eventConfig().fields[id]||{};if(!f.metric)return '';const account=f.mode==='common'?(f.account||'Haier'):eventCurrentAccount();const raw=eventMetricValue(account,f.metric);const calculated=eventApplyFormula(raw,f.formula||'value');return Number.isFinite(calculated)?calculated:'';}
+function eventCurrentAccount(){const login=String(state.user?.login||'').trim().toLowerCase();if(login==='haier')return 'Haier';if(login==='bosch')return 'Bosch';return state.user?.name||state.user?.login||'';}
+function eventRowsForAccount(account){const target=String(account||'').trim().toLowerCase();return (state.walletRows||[]).filter(x=>{const rowAccount=String(x.account||'').trim().toLowerCase();if(rowAccount===target)return true;const sale=(state.sales||[]).find(s=>String(s.id)===String(x.saleId));return !!sale&&canonicalAccount(sale.createdBy,sale.createdByName)===target;});}
+function eventMetricValue(account,metric){
+ const rows=eventRowsForAccount(account),n=v=>Number(String(v??'').replace(/\s/g,'').replace(',','.'))||0;
+ const sum=key=>rows.reduce((a,r)=>a+n(r[key]),0);
+ const checks=new Set();rows.forEach(r=>{const date=String(r.date||r.saleDate||'').trim(),receipt=String(r.receipt||'').trim();checks.add(receipt?date+'|'+receipt:'sale|'+r.saleId)});
+ const products=sum('quantity'),cnt=checks.size;
+ const profit=rows.reduce((a,r)=>a+n(r.rank)+n(r.receiptDuration)+n(r.illiquid)+n(r.supplier)+n(r.services)+n(r.dayTotal)+n(r.terminal)+n(r.it)+n(r.promotions),0);
+ const bonus=rows.reduce((a,r)=>a+(n(r.rank)+n(r.illiquid)+n(r.supplier))/100*30,0);
+ const vals={bonus,profit,products,checks:cnt,avg:cnt?products/cnt:0,rank:sum('rank'),receiptDuration:sum('receiptDuration'),illiquid:sum('illiquid'),supplier:sum('supplier'),services:sum('services'),dayTotal:sum('dayTotal'),terminal:sum('terminal'),it:sum('it'),promotions:sum('promotions')};
+ return metric==='bonus'?bonus:(vals[metric]??0);
+}
+// Arithmetic-only parser: no eval, property access, function calls or executable expressions.
+function eventApplyFormula(value,formula){
+ const expr=String(formula||'value').replace(/\bvalue\b/gi,'('+String(Number(value)||0)+')').replace(/,/g,'.').replace(/\s+/g,'');
+ if(!/^[0-9+*/().-]+$/.test(expr))return NaN;
+ const tokens=expr.match(/\d*\.?\d+|[()+*/-]/g)||[];let pos=0;
+ function atom(){const t=tokens[pos++];if(t==='('){const v=add();if(tokens[pos++]!==')')throw Error('paren');return v;}if(t==='-')return -atom();if(t==='+')return atom();if(!t||!/^\d*\.?\d+$/.test(t))throw Error('number');return Number(t);}
+ function mul(){let v=atom();while(tokens[pos]==='*'||tokens[pos]==='/'){const op=tokens[pos++],b=atom();v=op==='*'?v*b:v/b;}return v;}
+ function add(){let v=mul();while(tokens[pos]==='+'||tokens[pos]==='-'){const op=tokens[pos++],b=mul();v=op==='+'?v+b:v-b;}return v;}
+ try{const result=add();return pos===tokens.length&&Number.isFinite(result)?result:NaN;}catch(e){return NaN;}
+}
+function eventFormatValue(value,conf){if(value===''||value===null||value===undefined)return '';const decimals=Number(conf?.decimals??0);return Number(value).toLocaleString('ru-RU',{maximumFractionDigits:Math.max(0,Math.min(4,decimals))});}
+function renderEventSettings(c){
+ if(!isSiteOwner()){c.innerHTML='<div class="empty">Настройки мероприятия доступны только владельцу.</div>';return;}
+ const cfg=eventConfig(),id=window.eventSelectedField||EVENT_BOARD_FIELDS[0].id,field=EVENT_BOARD_FIELDS.find(x=>x.id===id)||EVENT_BOARD_FIELDS[0],f=cfg.fields[id]||{mode:'individual',account:'Haier',metric:'bonus',formula:'value / 100 * 10',decimals:0};
+ const metricOptions=EVENT_METRICS.map(m=>`<option value="${m.value}" ${f.metric===m.value?'selected':''}>${esc(m.label)}</option>`).join('');
+ const preview=eventBoardMarkup(true);
+ c.innerHTML=`<div class="page-head"><div><h1>Мероприятие</h1><div class="muted">Настройка призов и показателей на изображении. Сначала сохраните, затем активируйте.</div></div><span class="event-status ${cfg.active?'active':''}">${cfg.active?'Активно':'Не активировано'}</span></div>
+ <div class="event-admin-layout"><div><div class="event-editor-card" style="margin-bottom:14px"><h3>Область мероприятия</h3>${preview}<div class="event-admin-help">Нажмите на любое поле с рамкой, чтобы настроить его. Нажмите на одну из трёх верхних рамок, чтобы загрузить изображение приза. Изображения автоматически уменьшаются для экономии места при синхронизации.</div></div>
+ <div class="event-editor-card"><h3>Изображения призов</h3><div class="event-form-actions">${[0,1,2].map(i=>`<label class="btn small" style="cursor:pointer">${cfg.prizes[i]?'Заменить приз '+(i+1):'Загрузить приз '+(i+1)}<input type="file" accept="image/*" style="display:none" onchange="eventPrizeUpload(${i},this)"></label>${cfg.prizes[i]?`<button class="btn small" onclick="clearEventPrize(${i})">Убрать</button>`:''}`).join('')}</div></div></div>
+ <div class="event-editor-card"><h3>Настройка поля</h3><div class="muted" style="font-size:13px">${esc(field.label)}</div>
+ <div class="event-form-row"><label>Тип показателя</label><select id="eventMode" onchange="updateEventField('${id}','mode',this.value)"><option value="individual" ${f.mode!=='common'?'selected':''}>Индивидуальный — кошелёк текущего пользователя</option><option value="common" ${f.mode==='common'?'selected':''}>Общий — выбранный кошелёк для всех</option></select></div>
+ <div class="event-form-row" id="eventAccountRow" style="${f.mode==='common'?'':'display:none'}"><label>Кошелёк для общего показателя</label><select id="eventAccount" onchange="updateEventField('${id}','account',this.value)"><option value="Haier" ${f.account==='Haier'?'selected':''}>Haier</option><option value="Bosch" ${f.account==='Bosch'?'selected':''}>Bosch</option></select></div>
+ <div class="event-form-row"><label>Источник данных из кошелька</label><select id="eventMetric" onchange="updateEventField('${id}','metric',this.value)">${metricOptions}</select></div>
+ <div class="event-form-row"><label>Формула (переменная value — выбранное значение кошелька)</label><input id="eventFormula" value="${esc(f.formula||'value')}" placeholder="Например: value / 100 * 10" oninput="updateEventField('${id}','formula',this.value)"></div>
+ <div class="event-form-actions"><button class="btn small" onclick="setEventFormula('${id}','value')">Без формулы</button><button class="btn small" onclick="setEventFormula('${id}','value / 100 * 10')">/100 × 10</button><button class="btn small" onclick="setEventFormula('${id}','value * 2')">× 2</button></div>
+ <div class="event-form-row"><label>Знаков после запятой</label><select id="eventDecimals" onchange="updateEventField('${id}','decimals',this.value)"><option value="0" ${Number(f.decimals||0)===0?'selected':''}>0</option><option value="1" ${Number(f.decimals)===1?'selected':''}>1</option><option value="2" ${Number(f.decimals)===2?'selected':''}>2</option><option value="3" ${Number(f.decimals)===3?'selected':''}>3</option><option value="4" ${Number(f.decimals)===4?'selected':''}>4</option></select></div>
+ <div class="event-admin-help">Предпросмотр: <b>${esc(eventFormatValue(eventApplyFormula(eventMetricValue(f.mode==='common'?(f.account||'Haier'):eventCurrentAccount(),f.metric||'bonus'),f.formula||'value'),f))||'—'}</b><br>Поддерживаются числа, скобки и операции +, −, ×, ÷. Используйте <code>value</code> вместо значения кошелька.</div>
+ <div class="event-form-actions"><button class="btn primary" onclick="saveEventSettings()">Сохранить настройки</button><button class="btn ${cfg.active?'danger':'primary'}" onclick="toggleEventActive()">${cfg.active?'Выключить мероприятие':'Активировать мероприятие'}</button></div>
+ <div class="event-admin-help">Сохранение не включает мероприятие автоматически. Активация и выключение выполняются отдельно. Настройки сохраняются в общем состоянии сайта Supabase.</div></div></div>`;
+}
+function updateEventField(id,key,value){const cfg=eventConfig();if(!cfg.fields[id])cfg.fields[id]={mode:'individual',account:'Haier',metric:'bonus',formula:'value / 100 * 10',decimals:0};cfg.fields[id][key]=key==='decimals'?Number(value):value;if(key==='mode'){renderEventSettings(document.getElementById('content'));return;}if(key==='account'||key==='metric'||key==='formula'||key==='decimals'){const active=document.activeElement;const pos=active&&typeof active.selectionStart==='number'?active.selectionStart:null;renderEventSettings(document.getElementById('content'));if(key==='formula'){const el=document.getElementById('eventFormula');if(el){el.focus();if(pos!==null)el.setSelectionRange(pos,pos);}}}}
+function setEventFormula(id,formula){updateEventField(id,'formula',formula);}
+function clearEventPrize(index){if(!isSiteOwner())return;eventConfig().prizes[index]='';renderEventSettings(document.getElementById('content'));}
+function saveEventSettings(){if(!isSiteOwner()){alert('Только владелец может сохранять настройки.');return;}const cfg=eventConfig();for(const [id,f] of Object.entries(cfg.fields)){if(f.formula&&!Number.isFinite(eventApplyFormula(1,f.formula))){alert('Некорректная формула в поле «'+(EVENT_BOARD_FIELDS.find(x=>x.id===id)?.label||id)+'». Используйте value, числа, скобки и арифметические операции.');return;}}cfg.updatedAt=new Date().toISOString();save();log('Сохранение настроек мероприятия','Мероприятие','', 'Сохранены изображения призов и настройки показателей');renderEventSettings(document.getElementById('content'));alert('Настройки мероприятия сохранены.');}
+function toggleEventActive(){if(!isSiteOwner()){alert('Только владелец может активировать мероприятие.');return;}const cfg=eventConfig();if(!cfg.active){if(!cfg.prizes.some(Boolean)){if(!confirm('Ни одно изображение приза не загружено. Активировать мероприятие всё равно?'))return;}cfg.active=true;}else{if(!confirm('Выключить мероприятие для пользователей?'))return;cfg.active=false;}cfg.updatedAt=new Date().toISOString();save();log('Статус мероприятия','Мероприятие','',cfg.active?'Активировано':'Выключено');renderEventSettings(document.getElementById('content'));}
 
 </script>
 
