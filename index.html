@@ -678,14 +678,6 @@ body:has(#login.hidden) { overflow:hidden !important; }
 .event-form-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.event-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;background:#fff0d5;color:#612014}.event-status.active{background:#dcfce7;color:#166534}
 .event-admin-help{font-size:12px;color:#f3d8c9;line-height:1.5;margin-top:10px}.event-admin-help code{color:#ffe9a5}
 .event-live-shell{width:100%;max-width:1500px;margin:0 auto;padding:0 0 18px}
-/* Events page: present the information board across the whole device viewport. */
-.event-live-shell:has(.event-board-live),.event-live-shell:has(.event-empty-wrap){position:fixed;inset:0;z-index:99999;width:100vw;height:100vh;height:100dvh;max-width:none;margin:0;padding:0;background:#160607;display:flex;align-items:stretch;justify-content:stretch;overflow:hidden}
-.event-live-shell .event-live-intro{display:none}
-.event-live-shell .event-board-live{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;aspect-ratio:auto;margin:0;border:0;border-radius:0;box-shadow:none;background-size:100% 100%;flex:none}
-.event-live-shell .event-empty-wrap{position:absolute;inset:0;width:100%;height:100%;max-width:none;margin:0;border-radius:0;box-shadow:none;display:block;background:#160607}
-.event-live-shell .event-empty-wrap img{width:100%;height:100%;object-fit:fill}
-.event-exit-button{position:fixed;z-index:100001;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));padding:10px 14px;border:1px solid #ffffff88;border-radius:999px;background:#160607dd;color:#fff;font-size:14px;font-weight:700;box-shadow:0 2px 12px #0008;cursor:pointer;backdrop-filter:blur(6px)}
-.event-exit-button:focus-visible{outline:2px solid #ffd65a;outline-offset:3px}
 .event-live-intro{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding:13px 16px;border-radius:12px;background:linear-gradient(100deg,#300403,#65100d);border:1px solid #f8c75b66;color:#fff;box-shadow:0 8px 24px #0002}
 .event-live-intro h1{margin:0;font-size:clamp(20px,2.4vw,30px);color:#fff}.event-live-intro .muted{color:#f8d8c5}
 @media(max-width:900px){.event-admin-layout{grid-template-columns:1fr}.event-value-field{font-size:clamp(7px,1.6vw,14px)}.event-prize-slot{font-size:9px}.event-settings-screen{margin:-20px;padding:20px 12px 28px}.event-live-intro{align-items:flex-start;flex-direction:column}}
@@ -3160,8 +3152,8 @@ function eventConfig(){
 }
 function renderEvents(c){
  const cfg=eventConfig();
- if(!cfg.active){c.innerHTML='<div class="event-live-shell"><button type="button" class="event-exit-button" onclick="navigate(\'service\')">← Назад в меню</button><div class="event-live-intro"><div><h1>Мероприятия</h1><div class="muted">Специальные мероприятия и призы</div></div><span class="event-status">Пока не активно</span></div><div class="event-empty-wrap"><img src="assets/event-empty.png" alt="Пока что заданий нет"></div></div>';return;}
- c.innerHTML='<div class="event-live-shell"><button type="button" class="event-exit-button" onclick="navigate(\'service\')">← Назад в меню</button><div class="event-live-intro"><div><h1>Мероприятия</h1><div class="muted">Ваши показатели и призы</div></div><span class="event-status active">Мероприятие активно</span></div>'+eventBoardMarkup(false).replace('class="event-board"','class="event-board event-board-live"')+'</div>';
+ if(!cfg.active){c.innerHTML='<div class="event-live-shell"><div class="event-live-intro"><div><h1>Мероприятия</h1><div class="muted">Специальные мероприятия и призы</div></div><span class="event-status">Пока не активно</span></div><div class="event-empty-wrap"><img src="assets/event-empty.png" alt="Пока что заданий нет"></div></div>';return;}
+ c.innerHTML='<div class="event-live-shell"><div class="event-live-intro"><div><h1>Мероприятия</h1><div class="muted">Ваши показатели и призы</div></div><span class="event-status active">Мероприятие активно</span></div>'+eventBoardMarkup(false).replace('class="event-board"','class="event-board event-board-live"')+'</div>';
 }
 function eventBoardMarkup(editable){
  const cfg=eventConfig(),prizes=cfg.prizes||[],layout=cfg.prizeLayout||[];
