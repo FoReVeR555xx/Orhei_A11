@@ -1480,7 +1480,8 @@ async function login(e){
    refreshNavigationPermissions();
    applyUserTabOrder();
    log('Вход в систему','Авторизация');
-   navigate('service');
+   const firstWorkTab=getTabOrder(state.user.login).find(id=>{const button=document.querySelector(`.nav button[data-page="${id}"]`);return !!button&&button.style.display!=='none'});
+   navigate(firstWorkTab||'service');
  }catch(err){ console.error(err); alert('Не удалось войти или загрузить данные Supabase: '+(err?.message||'проверьте логин, пароль и доступ к базе.')); }
 }
 async function logout(){
@@ -3325,4 +3326,21 @@ function toggleEventActive(){if(!isSiteOwner()){alert('Только владел
   #content .table-card{max-height:none!important;overflow-x:auto!important;overflow-y:visible!important;-webkit-overflow-scrolling:touch!important;}
 }
 @supports not (height:100dvh){@media(max-width:700px){#app,.app,.main{height:100vh!important;max-height:100vh!important}}}
+</style>
+
+<style id="announcement-editor-translucent-style">
+/* Announcement composer: translucent field with a clear outline and readable text. */
+#announcementForm textarea[name="message"]{
+  background:rgba(148,163,184,.10)!important;
+  color:var(--text,#17202a)!important;
+  border:1px solid rgba(100,116,139,.72)!important;
+  box-shadow:inset 0 1px 2px rgba(15,23,42,.04)!important;
+  caret-color:var(--primary,#1d4ed8);
+}
+#announcementForm textarea[name="message"]::placeholder{color:var(--muted,#6b7280)!important;opacity:1}
+#announcementForm textarea[name="message"]:focus{
+  background:rgba(148,163,184,.14)!important;
+  border-color:var(--primary,#1d4ed8)!important;
+  box-shadow:0 0 0 3px rgba(37,99,235,.14)!important;
+}
 </style>
