@@ -1,7 +1,5 @@
--- Recreate the email send log read policy for site owners.
--- The profiles table has group_name but does not have a role column.
+-- Fix owner-only read policy: public.profiles has no role column.
 drop policy if exists "site owners can read email send logs" on public.email_send_logs;
-
 create policy "site owners can read email send logs"
 on public.email_send_logs
 for select

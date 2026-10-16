@@ -1,4 +1,4 @@
--- Email delivery audit log; only owner/admin profiles can read it.
+-- Email delivery audit log; only owner-group profiles can read it.
 create table if not exists public.email_send_logs (
   id bigint generated always as identity primary key,
   created_at timestamptz not null default now(),
@@ -17,7 +17,7 @@ grant select on public.email_send_logs to authenticated;
 grant all on public.email_send_logs to service_role;
 drop policy if exists "site owners can read email send logs" on public.email_send_logs;
 create policy "site owners can read email send logs" on public.email_send_logs for select to authenticated
-using (exists (select 1 from public.profiles p where p.id = auth.uid() and (p.role = 'admin' or lower(p.group_name) = lower('Владельцы'))));
+using (exists (select 1 from public.profiles p where p.id = auth.uid() and lower(p.group_name) = lower('Владельцы')));
 -- Keep the last 48 hours only. Also run cleanup on each log insert.
 create or replace function public.cleanup_email_send_logs()
 returns trigger language plpgsql security definer set search_path = public as $$
