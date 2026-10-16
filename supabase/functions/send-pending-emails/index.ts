@@ -45,10 +45,14 @@ Deno.serve(async (req) => {
       // Claim this notification/recipient before sending, so concurrent cron runs cannot duplicate it.
       const { error: claimError } = await supabase.from('email_notification_sent').insert({ notification_id: str(n.id), recipient_login: login, recipient_email: email });
       if (claimError) { skipped++; continue; }
+      const { data: logRow } = await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email, email_type: kind, subject, body, status: 'attempt' }).select('id').maybeSingle();
       try {
         await transporter.sendMail({ from: `Orhei A11 <${gmailUser}>`, to: email, subject, text: body, html: `<div style="font-family:Arial,sans-serif;white-space:pre-wrap;line-height:1.6">${safe(body)}</div>` });
+        if (logRow?.id) await supabase.from('email_send_logs').update({ status: 'sent' }).eq('id', logRow.id);
         sent++;
-      } catch (_e) {
+      } catch (e) {
+        const message = e instanceof Error ? e.message : str(e);
+        if (logRow?.id) await supabase.from('email_send_logs').update({ status: 'failed', error_message: message.slice(0, 2000) }).eq('id', logRow.id);
         // Failed SMTP attempt is removed from the ledger, allowing a later retry.
         await supabase.from('email_notification_sent').delete().eq('notification_id', str(n.id)).eq('recipient_login', login);
         errors++;
