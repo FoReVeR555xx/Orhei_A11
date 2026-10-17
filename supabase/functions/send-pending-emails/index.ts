@@ -8,6 +8,17 @@ const safe = (v: string) => v.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;',
 function fill(template: string, values: Record<string,string>) { return template.replace(/\{(account|section|message)\}/g, (_, k) => values[k] ?? ''); }
 function kindOf(n: any) { return n?.orderNotification ? 'productOrder' : (n?.serviceActId || str(n?.id).startsWith('ann-sa-')) ? 'serviceAct' : 'other'; }
 function sectionOf(kind: string) { return kind === 'productOrder' ? 'Заказ товара' : kind === 'serviceAct' ? 'Сервис-Акт' : 'Уведомления'; }
+function isOrderProcessor(user: any, groups: any[]) {
+  const direct = Array.isArray(user?.permissions) ? user.permissions : [];
+  const groupName = str(user?.group || user?.group_name).trim().toLocaleLowerCase('ru-RU');
+  const group = groups.find((g: any) => str(g?.name).trim().toLocaleLowerCase('ru-RU') === groupName);
+  const gp = Array.isArray(group?.permissions) ? group.permissions : [];
+  return direct.includes('productOrder.process') || gp.includes('productOrder.process');
+}
+function fmtTime(value: unknown) {
+  const n = typeof value === 'number' ? value : Date.parse(str(value));
+  return n && Number.isFinite(n) ? new Date(n).toLocaleString('ru-RU', { timeZone: 'Europe/Chisinau' }) : 'неизвестно';
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -30,13 +41,10 @@ Deno.serve(async (req) => {
   const announcements = Array.isArray(payload.announcements) ? payload.announcements : [];
   const now = Date.now();
   const pendingByLogin = new Map<string, any[]>();
-  const unreadByLogin = new Map<string, any[]>();
   let skipped = 0, errors = 0, sent = 0;
 
-  // First collect all currently unread notifications per recipient. The 60-minute
-  // rule is a trigger: once at least one unread notification has aged past the
-  // delay, include the recipient's other unread notifications in the same digest,
-  // even if those arrived more recently.
+  // Collect only notifications that individually satisfy the existing delay rule.
+  // All eligible unread notifications are grouped into one digest per recipient.
   for (const n of announcements) {
     const created = Number(n?.createdAt) || Date.parse(n?.createdAt || '') || 0;
     if (!n?.id || !created) continue;
@@ -46,18 +54,27 @@ Deno.serve(async (req) => {
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { skipped++; continue; }
       const readBy = Array.isArray(n.readBy) ? n.readBy.map((x: unknown) => str(x).toLowerCase()) : [];
       if (readBy.includes(login)) { skipped++; continue; }
-      if (!unreadByLogin.has(login)) unreadByLogin.set(login, []);
-      unreadByLogin.get(login)!.push({ notification: n, login, email });
-      if (now - created >= delayMs) {
-        // Presence of this marker means the delay condition is satisfied for this user.
-        if (!pendingByLogin.has(login)) pendingByLogin.set(login, []);
+      if (now - created < delayMs) continue;
+      if (!pendingByLogin.has(login)) pendingByLogin.set(login, []);
+      pendingByLogin.get(login)!.push({ notification: n, login, email });
+    }
+  }
+  // Record that eligible notifications are queued for the next scheduled send, once per notification/recipient.
+  for (const [login, candidates] of pendingByLogin) {
+    for (const item of candidates) {
+      const notificationId = str(item.notification.id);
+      const { data: priorScheduled, error: scheduledLookupError } = await supabase.from('email_send_logs').select('id').eq('recipient_login', login).eq('notification_id', notificationId).eq('status', 'scheduled').limit(1);
+      if (scheduledLookupError) { errors++; continue; }
+      if (!priorScheduled?.length) {
+        await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: item.email, notification_id: notificationId, email_type: 'notification', subject: 'Запланирована отправка уведомления', body: `Уведомление ожидает отправки после задержки. Создано уведомление: ${fmtTime(item.notification.createdAt)}.`, status: 'scheduled' });
       }
     }
   }
-  // Once a recipient qualifies, send all of their unread notifications not already
-  // sent, rather than only those whose individual timers have expired.
+
+  // Remove already-sent items, then send one digest for each recipient's remaining
+  // eligible notifications in this run.
   for (const login of pendingByLogin.keys()) {
-    const candidates = unreadByLogin.get(login) ?? [];
+    const candidates = pendingByLogin.get(login) ?? [];
     const fresh: any[] = [];
     for (const item of candidates) {
       const { data: prior, error: lookupError } = await supabase.from('email_notification_sent').select('notification_id').eq('notification_id', str(item.notification.id)).eq('recipient_login', login).maybeSingle();
@@ -66,6 +83,28 @@ Deno.serve(async (req) => {
       fresh.push(item);
     }
     pendingByLogin.set(login, fresh);
+  }
+
+  // For users who can process product orders, pause email delivery after 3 emails
+  // since their most recent successful login. A new login resets the count.
+  const users = Array.isArray(payload.users) ? payload.users : [];
+  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  const userByLogin = new Map(users.map((u: any) => [str(u?.login).trim().toLowerCase(), u]));
+  for (const [login, candidates] of pendingByLogin) {
+    if (!candidates.length) continue;
+    const user: any = userByLogin.get(login);
+    if (!user || !isOrderProcessor(user, groups)) continue;
+    const lastLogin = Date.parse(str(user.lastLoginAt || user.last_login_at || '')) || 0;
+    let countQuery = supabase.from('email_delivery_events').select('id', { count: 'exact', head: true }).eq('recipient_login', login).gte('sent_at', lastLogin ? new Date(lastLogin).toISOString() : '1970-01-01T00:00:00.000Z');
+    const { count: sentSinceLogin, error: countError } = await countQuery;
+    if (countError) { errors++; continue; }
+    if ((sentSinceLogin || 0) >= 3) {
+      const email = candidates[0]?.email || str(recipients[login]);
+      const reason = `Отправка пропущена: пользователь уже получил ${sentSinceLogin} письма после последнего входа. Последний вход: ${fmtTime(lastLogin)}. Письма после этого входа: ${sentSinceLogin}. Новые письма не отправляются до следующего входа.`;
+      await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email, email_type: 'digest', subject: 'Письмо не отправлено: лимит 3 письма', body: reason, status: 'skipped', error_message: reason });
+      pendingByLogin.set(login, []);
+      skipped += candidates.length;
+    }
   }
 
   const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: gmailUser, pass: gmailPass } });
