@@ -1175,6 +1175,7 @@ body.app-active { overflow:hidden !important; }
     <button data-page="users" class="admin-only">♙ &nbsp; Пользователи</button>
     <button data-page="template" class="admin-only">▧ &nbsp; Сервис [Шаблон A4]</button>
     <button data-page="deliveryTemplate" class="admin-only">▧ &nbsp; Доставки [Шаблон A4]</button>
+    <button data-page="deliveryReportTemplate" class="admin-only">▦ &nbsp; Шаблон отчёта доставок</button>
     <button data-page="decoding" class="admin-only">⌘ &nbsp; Расшифровка</button>
     <button data-page="reportBinding" class="admin-only">↔ &nbsp; Привязка</button>
     <button data-page="settings" class="admin-only">⚙ &nbsp; Настройки сайта</button>
@@ -1441,9 +1442,24 @@ function can(p){
  return direct.includes(p)||groupPermissions.includes(p);
 }
 function isSiteOwner(){return state.user?.login==='admin'||String(state.user?.group||'').toLocaleLowerCase('ru-RU')==='владельцы'}
-function siteSettings(){if(!state.siteSettings||typeof state.siteSettings!=='object')state.siteSettings={requireDeliveryCategories:false,deliveryNotificationsEnabled:true};if(state.siteSettings.requireDeliveryCategories===undefined)state.siteSettings.requireDeliveryCategories=false;if(state.siteSettings.deliveryNotificationsEnabled===undefined)state.siteSettings.deliveryNotificationsEnabled=true;if(!Array.isArray(state.siteSettings.productOrders))state.siteSettings.productOrders=[];if(!Array.isArray(state.siteSettings.productOrderCategories))state.siteSettings.productOrderCategories=[];if(!Array.isArray(state.siteSettings.serviceActs))state.siteSettings.serviceActs=[];if(!Number.isInteger(Number(state.siteSettings.serviceActLimit))||Number(state.siteSettings.serviceActLimit)<1)state.siteSettings.serviceActLimit=25;if(!Number.isInteger(Number(state.siteSettings.productOrderLimit))||Number(state.siteSettings.productOrderLimit)<1)state.siteSettings.productOrderLimit=500;if(!Number.isInteger(Number(state.siteSettings.productOrderCleanupCount))||Number(state.siteSettings.productOrderCleanupCount)<1)state.siteSettings.productOrderCleanupCount=10;if(!Array.isArray(state.siteSettings.productOrderCleanupStatuses))state.siteSettings.productOrderCleanupStatuses=['Заказано','Отказано'];if(!Number.isInteger(Number(state.siteSettings.deliveryLimit))||Number(state.siteSettings.deliveryLimit)<1)state.siteSettings.deliveryLimit=250;if(!Number.isInteger(Number(state.siteSettings.deliveryCleanupCount))||Number(state.siteSettings.deliveryCleanupCount)<1)state.siteSettings.deliveryCleanupCount=10;if(!Array.isArray(state.siteSettings.deliveryCleanupStatuses))state.siteSettings.deliveryCleanupStatuses=['Доставлен'];if(!Number.isInteger(Number(state.siteSettings.serviceLimit))||Number(state.siteSettings.serviceLimit)<1)state.siteSettings.serviceLimit=250;if(!Number.isInteger(Number(state.siteSettings.serviceCleanupCount))||Number(state.siteSettings.serviceCleanupCount)<1)state.siteSettings.serviceCleanupCount=10;if(!Array.isArray(state.siteSettings.serviceCleanupStatuses))state.siteSettings.serviceCleanupStatuses=['Все сервисы'];return state.siteSettings}
+const DEFAULT_DELIVERY_REPORT_COLUMNS=[
+ {source:'reportDate',label:'Дата'},{source:'reportIndex',label:'№'},{source:'fixedOrhei',label:'Откуда'},{source:'address',label:'Куда'},
+ {source:'fridge_gt180',label:'Холодильники >180 см'},{source:'fridge_lt180',label:'Холодильники <180 см'},{source:'other_kbt',label:'Другое КБТ'},
+ {source:'mbt',label:'Тип товара МБТ'},{source:'tv',label:'Телевизоры'},{source:'other_avit',label:'Другое AV/IT'},
+ {source:'blank',label:'Пройденный километраж'},{source:'blank',label:'Расход топлива л/100 км'},{source:'blank',label:'Потрачено литров топлива'},
+ {source:'blank',label:'Стоимость 1 л топлива'},{source:'blank',label:'Итого затрат, лей'},{source:'deliveryLabel',label:'Доставка'},
+ {source:'city',label:'Город'},{source:'blank',label:'Пригород'},{source:'blank',label:'ПВЗ'},{source:'blank',label:'Коммент'}
+];
+const DELIVERY_REPORT_SOURCES=[
+ ['reportDate','Дата создания доставки'],['reportIndex','Порядковый № строки отчёта'],['deliveryNumber','Номер доставки'],['fixedOrhei','Фиксированное значение «Orhei»'],['address','Адрес доставки'],['recipientFio','ФИО получателя'],['recipientPhone','Телефон получателя'],['documentDate','Дата документа'],['status','Статус доставки'],['deliveryType','Тип доставки'],['express24','Express 24'],['precomanda','Предзаказ'],['specialCondition','Особое условие'],['totalValue','Общая стоимость'],['createdByName','Кто создал'],['createdBy','Логин создателя'],['createdAt','Дата/время создания'],['date','Дата создания (текст)'],['dateTime','Дата и время создания (текст)'],['requestNo','Номер заявки'],['deliveryRowCount','Количество строк товара'],['showTotalCost','Показывать общую стоимость'],
+ ['fridge_gt180','Количество: холодильники >180 см'],['fridge_lt180','Количество: холодильники <180 см'],['other_kbt','Количество: другое КБТ'],['mbt','Количество: МБТ'],['tv','Количество: телевизоры'],['other_avit','Количество: другое AV/IT'],
+ ...Array.from({length:6},(_,i)=>[`model${i+1}`,`Модель ${i+1}`]),...Array.from({length:6},(_,i)=>[`category${i+1}`,`Категория товара ${i+1}`]),...Array.from({length:6},(_,i)=>[`qty${i+1}`,`Количество товара ${i+1}`]),...Array.from({length:6},(_,i)=>[`cost${i+1}`,`Цена товара ${i+1}`]),
+ ['deliveryLabel','Метка доставки (magazin / условие)'],['city','Город (по адресу Orhei)'],['blank','Оставить пустым']
+];
+function deliveryReportColumns(){const saved=siteSettings().deliveryReportColumns;return DEFAULT_DELIVERY_REPORT_COLUMNS.map((d,i)=>({...d,...(Array.isArray(saved)&&saved[i]?saved[i]:{})}));}
+function siteSettings(){if(!state.siteSettings||typeof state.siteSettings!=='object')state.siteSettings={requireDeliveryCategories:false,deliveryNotificationsEnabled:true};if(!Array.isArray(state.siteSettings.deliveryReportColumns))state.siteSettings.deliveryReportColumns=JSON.parse(JSON.stringify(DEFAULT_DELIVERY_REPORT_COLUMNS));if(state.siteSettings.requireDeliveryCategories===undefined)state.siteSettings.requireDeliveryCategories=false;if(state.siteSettings.deliveryNotificationsEnabled===undefined)state.siteSettings.deliveryNotificationsEnabled=true;if(!Array.isArray(state.siteSettings.productOrders))state.siteSettings.productOrders=[];if(!Array.isArray(state.siteSettings.productOrderCategories))state.siteSettings.productOrderCategories=[];if(!Array.isArray(state.siteSettings.serviceActs))state.siteSettings.serviceActs=[];if(!Number.isInteger(Number(state.siteSettings.serviceActLimit))||Number(state.siteSettings.serviceActLimit)<1)state.siteSettings.serviceActLimit=25;if(!Number.isInteger(Number(state.siteSettings.productOrderLimit))||Number(state.siteSettings.productOrderLimit)<1)state.siteSettings.productOrderLimit=500;if(!Number.isInteger(Number(state.siteSettings.productOrderCleanupCount))||Number(state.siteSettings.productOrderCleanupCount)<1)state.siteSettings.productOrderCleanupCount=10;if(!Array.isArray(state.siteSettings.productOrderCleanupStatuses))state.siteSettings.productOrderCleanupStatuses=['Заказано','Отказано'];if(!Number.isInteger(Number(state.siteSettings.deliveryLimit))||Number(state.siteSettings.deliveryLimit)<1)state.siteSettings.deliveryLimit=250;if(!Number.isInteger(Number(state.siteSettings.deliveryCleanupCount))||Number(state.siteSettings.deliveryCleanupCount)<1)state.siteSettings.deliveryCleanupCount=10;if(!Array.isArray(state.siteSettings.deliveryCleanupStatuses))state.siteSettings.deliveryCleanupStatuses=['Доставлен'];if(!Number.isInteger(Number(state.siteSettings.serviceLimit))||Number(state.siteSettings.serviceLimit)<1)state.siteSettings.serviceLimit=250;if(!Number.isInteger(Number(state.siteSettings.serviceCleanupCount))||Number(state.siteSettings.serviceCleanupCount)<1)state.siteSettings.serviceCleanupCount=10;if(!Array.isArray(state.siteSettings.serviceCleanupStatuses))state.siteSettings.serviceCleanupStatuses=['Все сервисы'];return state.siteSettings}
 const PAGE_PERMISSION={events:'event.view',serviceAct:'serviceAct.view',productOrders:'productOrder.view',service:'service.view',delivery:'delivery.view',sales:'sales.view',wallet:'wallet.view',archive:'archive.view',logs:'logs.view',permissions:'permissions.view',groups:'groups.view',users:'users.view',template:'template.view',deliveryTemplate:'deliveryTemplate.view',decoding:'decoding.view',reportBinding:'reportBinding.view',announcements:'announcements.manage',tabOrder:'tabOrder.manage',settings:'settings.view'};
-function refreshNavigationPermissions(){document.querySelectorAll('.nav button[data-page]').forEach(b=>{const required=PAGE_PERMISSION[b.dataset.page];b.style.display=((b.dataset.page==='settings'||b.dataset.page==='eventSettings'||b.dataset.page==='emailSettings')?isSiteOwner():((b.dataset.page==='announcements'||b.dataset.page==='tabOrder')?(isSiteOwner()||can(b.dataset.page==='announcements'?'announcements.manage':'tabOrder.manage')):(!required||can(required)||can(({permissions:'permissions.manage',groups:'groups.manage',users:'users.manage',template:'template.manage',deliveryTemplate:'deliveryTemplate.manage',decoding:'decoding.manage',reportBinding:'reportBinding.manage'})[b.dataset.page]||'__no_permission__')))) ?'flex':'none'});document.querySelectorAll('.nav-title.admin-only').forEach(x=>x.style.display=(isSiteOwner()||['logs.view','permissions.view','permissions.manage','groups.view','groups.manage','users.view','users.manage','template.view','template.manage','deliveryTemplate.view','deliveryTemplate.manage','decoding.view','decoding.manage','reportBinding.view','reportBinding.manage','announcements.manage','tabOrder.manage','archive.view'].some(can))?'':'none')}
+function refreshNavigationPermissions(){document.querySelectorAll('.nav button[data-page]').forEach(b=>{const required=PAGE_PERMISSION[b.dataset.page];b.style.display=((b.dataset.page==='settings'||b.dataset.page==='eventSettings'||b.dataset.page==='emailSettings'||b.dataset.page==='deliveryReportTemplate')?isSiteOwner():((b.dataset.page==='announcements'||b.dataset.page==='tabOrder')?(isSiteOwner()||can(b.dataset.page==='announcements'?'announcements.manage':'tabOrder.manage')):(!required||can(required)||can(({permissions:'permissions.manage',groups:'groups.manage',users:'users.manage',template:'template.manage',deliveryTemplate:'deliveryTemplate.manage',decoding:'decoding.manage',reportBinding:'reportBinding.manage'})[b.dataset.page]||'__no_permission__')))) ?'flex':'none'});document.querySelectorAll('.nav-title.admin-only').forEach(x=>x.style.display=(isSiteOwner()||['logs.view','permissions.view','permissions.manage','groups.view','groups.manage','users.view','users.manage','template.view','template.manage','deliveryTemplate.view','deliveryTemplate.manage','decoding.view','decoding.manage','reportBinding.view','reportBinding.manage','announcements.manage','tabOrder.manage','archive.view'].some(can))?'':'none')}
 function requirePermission(key){if(can(key))return true;alert('Недостаточно прав: '+key);return false}
 
 const ACCOUNT_BACKGROUNDS = {
@@ -1508,14 +1524,15 @@ async function logout(){
 }
 document.getElementById('loginForm').addEventListener('submit',login);
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));
-const titles={serviceAct:'Сервис-Акт',productOrders:'Заказ товара',events:'Мероприятия',eventSettings:'Мероприятие',service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',decoding:'Расшифровка',reportBinding:'Привязка',announcements:'Объявления',tabOrder:'Порядок вкладок',settings:'Настройки сайта',productOrderCategories:'Категории для заказов',emailSettings:'Настройки рассылки'};
-function navigate(page){const required=PAGE_PERMISSION[page];if((page==='settings'||page==='emailSettings'||page==='productOrderCategories')&&!isSiteOwner()){alert('Настройки доступны только владельцу.');return}if(required&&!((page==='announcements'||page==='tabOrder')&&isSiteOwner())&&!requirePermission(required))return;document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=titles[page];render(page);setTimeout(checkDeliveryNotifications,120)}
+const titles={serviceAct:'Сервис-Акт',productOrders:'Заказ товара',events:'Мероприятия',eventSettings:'Мероприятие',service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',deliveryReportTemplate:'Шаблон отчёта доставок',decoding:'Расшифровка',reportBinding:'Привязка',announcements:'Объявления',tabOrder:'Порядок вкладок',settings:'Настройки сайта',productOrderCategories:'Категории для заказов',emailSettings:'Настройки рассылки'};
+function navigate(page){const required=PAGE_PERMISSION[page];if((page==='settings'||page==='emailSettings'||page==='productOrderCategories'||page==='deliveryReportTemplate')&&!isSiteOwner()){alert('Настройки доступны только владельцу.');return}if(required&&!((page==='announcements'||page==='tabOrder')&&isSiteOwner())&&!requirePermission(required))return;document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=titles[page];render(page);setTimeout(checkDeliveryNotifications,120)}
 function render(page){
  const c=document.getElementById('content');
- const required=PAGE_PERMISSION[page];if((page==='settings'||page==='emailSettings'||page==='productOrderCategories')&&!isSiteOwner()){c.innerHTML='<div class="empty">Настройки доступны только владельцу.</div>';return;}if(required&&!((page==='announcements'||page==='tabOrder')&&isSiteOwner())&&!can(required)){c.innerHTML='<div class="empty">Недостаточно прав для этого раздела.</div>';return;}
+ const required=PAGE_PERMISSION[page];if((page==='settings'||page==='emailSettings'||page==='productOrderCategories'||page==='deliveryReportTemplate')&&!isSiteOwner()){c.innerHTML='<div class="empty">Настройки доступны только владельцу.</div>';return;}if(required&&!((page==='announcements'||page==='tabOrder')&&isSiteOwner())&&!can(required)){c.innerHTML='<div class="empty">Недостаточно прав для этого раздела.</div>';return;}
  if(page==='settings') return renderSiteSettings(c);
  if(page==='productOrderCategories') return renderProductOrderCategories(c);
  if(page==='emailSettings') return renderEmailSettings(c);
+ if(page==='deliveryReportTemplate') return renderDeliveryReportTemplate(c);
  if(page==='announcements') { if(!isSiteOwner()&&!can('announcements.manage')){c.innerHTML='<div class="empty">Недостаточно прав для объявлений.</div>';return;} return renderAnnouncements(c); }
  if(page==='tabOrder') { if(!isSiteOwner()&&!can('tabOrder.manage')){c.innerHTML='<div class="empty">Недостаточно прав для изменения порядка вкладок.</div>';return;} return renderTabOrder(c); }
  if(page==='events') return renderEvents(c);
@@ -2387,6 +2404,50 @@ function saveDeliveryLimits(){if(!isSiteOwner()){alert('Изменять нас�
 function saveServiceLimits(){if(!isSiteOwner()){alert('Изменять настройки может только владелец.');return}const limit=Number(document.getElementById('serviceLimitInput')?.value),count=Number(document.getElementById('serviceCleanupCountInput')?.value),statuses=[...document.querySelectorAll('input[name="serviceCleanupStatus"]:checked')].map(x=>x.value);if(!Number.isInteger(limit)||limit<1||limit>100000){alert('Максимальное количество сервисов должно быть от 1 до 100000.');return}if(!Number.isInteger(count)||count<1||count>10000){alert('Количество удаляемых сервисов должно быть от 1 до 10000.');return}if(!statuses.length){alert('Выберите хотя бы один вариант очистки.');return}const cfg=siteSettings();cfg.serviceLimit=limit;cfg.serviceCleanupCount=count;cfg.serviceCleanupStatuses=statuses;save();log('Настройки сервисов','Лимит и автоматическая очистка','',`Лимит ${limit}; удалять ${count}; режим: ${statuses.join(', ')}`);renderSiteSettings(document.getElementById('content'));alert('Настройки сервисов сохранены.')}
 function renderProductOrderCategories(c){if(!isSiteOwner()){c.innerHTML='<div class="empty">Настройки доступны только владельцу.</div>';return}const cats=siteSettings().productOrderCategories;c.innerHTML=`<div class="page-head"><div><h1>Категории для заказов</h1><div class="muted">Эти варианты будут доступны в поле «Откуда заказать» при создании заказа товара.</div></div></div><div class="card" style="max-width:850px"><form onsubmit="addProductOrderCategory(event)" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap"><label class="field" style="flex:1;min-width:220px"><span>Новый вариант</span><input name="category" required maxlength="160" placeholder="Например, склад или поставщик"></label><button class="btn primary">Добавить вариант</button></form><div style="margin-top:16px"><b>Доступные варианты (${cats.length})</b>${cats.length?`<div class="table-card" style="margin-top:8px"><table><thead><tr><th>Порядок</th><th>Название</th><th>Изменить порядок</th><th>Действие</th></tr></thead><tbody>${cats.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x)}</td><td><div class="actions"><button class="btn small" ${i===0?'disabled':''} onclick="moveProductOrderCategory(${i},-1)" title="Переместить выше">↑</button><button class="btn small" ${i===cats.length-1?'disabled':''} onclick="moveProductOrderCategory(${i},1)" title="Переместить ниже">↓</button></div></td><td><button class="btn small danger" onclick="removeProductOrderCategory(${i})">Удалить</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="margin-top:10px">Варианты ещё не добавлены. В заказе всё равно будет доступен пункт «Ручной ввод».</div>'}</div><p class="muted" style="margin-top:12px">Последним пунктом в выборе всегда будет «Ручной ввод».</p></div>`}function addProductOrderCategory(e){e.preventDefault();if(!isSiteOwner())return;const input=String(new FormData(e.target).get('category')||'').trim().toLocaleUpperCase('ru-RU');if(!input)return;const cats=siteSettings().productOrderCategories;if(cats.some(x=>String(x).toLocaleLowerCase('ru-RU')===input.toLocaleLowerCase('ru-RU'))){alert('Такой вариант уже существует.');return}cats.push(input);save();renderProductOrderCategories(document.getElementById('content'))}function moveProductOrderCategory(i,delta){if(!isSiteOwner())return;const cats=siteSettings().productOrderCategories;if(!Number.isInteger(i)||!Number.isInteger(delta)||i<0||i>=cats.length)return;const j=i+delta;if(j<0||j>=cats.length)return;[cats[i],cats[j]]=[cats[j],cats[i]];save();renderProductOrderCategories(document.getElementById('content'))}function removeProductOrderCategory(i){if(!isSiteOwner())return;const cats=siteSettings().productOrderCategories;if(!Number.isInteger(i)||i<0||i>=cats.length)return;if(!confirm('Удалить этот вариант из списка? Уже созданные заказы не изменятся.'))return;cats.splice(i,1);save();renderProductOrderCategories(document.getElementById('content'))}function toggleProductOrderManualStore(value){const wrap=document.getElementById('productOrderManualStoreWrap'),input=document.getElementById('productOrderManualStore');if(!wrap||!input)return;const manual=value==='__manual__';wrap.style.display=manual?'':'none';input.required=manual;if(!manual)input.value=''}
 function saveProductOrderLimits(){if(!isSiteOwner()){alert('Изменять настройки может только владелец.');return}const limit=Number(document.getElementById('productOrderLimitInput')?.value),count=Number(document.getElementById('productOrderCleanupCountInput')?.value),statuses=[...document.querySelectorAll('input[name="productOrderCleanupStatus"]:checked')].map(x=>x.value);if(!Number.isInteger(limit)||limit<1||limit>100000){alert('Максимальное количество заказов должно быть от 1 до 100000.');return}if(!Number.isInteger(count)||count<1||count>10000){alert('Количество удаляемых заказов должно быть от 1 до 10000.');return}if(!statuses.length){alert('Выберите хотя бы один статус для автоматической очистки.');return}const cfg=siteSettings();cfg.productOrderLimit=limit;cfg.productOrderCleanupCount=count;cfg.productOrderCleanupStatuses=statuses;save();log('Настройки заказов товара','Лимит и автоматическая очистка','',`Лимит ${limit}; удалять ${count}; статусы: ${statuses.join(', ')}`);renderSiteSettings(document.getElementById('content'));alert('Настройки заказов товара сохранены.')} 
+function renderDeliveryReportTemplate(c){
+ if(!isSiteOwner()){c.innerHTML='<div class="empty">Этот раздел доступен только владельцу.</div>';return;}
+ const cols=deliveryReportColumns(),letters=Array.from({length:20},(_,i)=>String.fromCharCode(65+i));
+ c.innerHTML=`<div class="page-head"><div><h1>Шаблон отчёта доставок</h1><div class="muted">Настрой, какие данные из доставок попадут в каждый столбец Excel. По умолчанию сохранены действующие правила отчёта.</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="resetDeliveryReportTemplate()">Сбросить стандарт</button><button class="btn primary" onclick="saveDeliveryReportTemplate()">Сохранить шаблон</button></div></div><div class="card" style="margin-bottom:12px"><div class="muted">Можно выбрать любой доступный источник, повторять источники в разных столбцах, менять заголовки и оставлять столбцы пустыми. Настройка влияет на будущие отчёты, не на сами доставки.</div></div><div class="table-card"><table class="data-table"><thead><tr><th>Столбец Excel</th><th>Заголовок в отчёте</th><th>Данные из доставок</th></tr></thead><tbody>${cols.map((col,i)=>`<tr><td><b>${letters[i]}</b></td><td><input id="deliveryReportColLabel_${i}" value="${esc(col.label||'')}" maxlength="80" style="min-width:150px;width:100%"></td><td><select id="deliveryReportColSource_${i}" style="min-width:220px;width:100%">${DELIVERY_REPORT_SOURCES.map(([key,label])=>`<option value="${esc(key)}" ${col.source===key?'selected':''}>${esc(label)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div><div class="form-actions" style="margin-top:14px"><button class="btn" onclick="resetDeliveryReportTemplate()">Сбросить стандарт</button><button class="btn primary" onclick="saveDeliveryReportTemplate()">Сохранить шаблон</button></div>`;
+}
+function saveDeliveryReportTemplate(){
+ if(!isSiteOwner())return;
+ const cols=DEFAULT_DELIVERY_REPORT_COLUMNS.map((base,i)=>({source:String(document.getElementById('deliveryReportColSource_'+i)?.value||base.source),label:String(document.getElementById('deliveryReportColLabel_'+i)?.value||'').trim()||base.label}));
+ const valid=new Set(DELIVERY_REPORT_SOURCES.map(x=>x[0]));cols.forEach((c,i)=>{if(!valid.has(c.source))c.source=DEFAULT_DELIVERY_REPORT_COLUMNS[i].source;});
+ siteSettings().deliveryReportColumns=cols;save();log('Изменение шаблона отчёта доставок','Шаблон отчёта доставок','','Сохранены источники и заголовки 20 столбцов');renderDeliveryReportTemplate(document.getElementById('content'));alert('Шаблон отчёта доставок сохранён.');
+}
+function resetDeliveryReportTemplate(){if(!isSiteOwner())return;if(!confirm('Вернуть исходные правила формирования отчёта доставок?'))return;siteSettings().deliveryReportColumns=JSON.parse(JSON.stringify(DEFAULT_DELIVERY_REPORT_COLUMNS));save();renderDeliveryReportTemplate(document.getElementById('content'));alert('Исходный шаблон отчёта восстановлен.');}
+function deliveryReportColumnValue(d,source,index,dt,counts){
+ switch(source){
+  case 'reportDate':return {v:new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()),t:'d'};
+  case 'reportIndex':return {v:index+1,t:'n'};
+  case 'deliveryNumber':{const v=String(d.number??'').replace(/\D/g,'');return v?{v:Number(v),t:'n'}:{v:'',t:'s'};}
+  case 'fixedOrhei':return {v:'Orhei',t:'s'};
+  case 'address':return {v:String(d.recipientAddress||''),t:'s'};
+  case 'recipientFio':return {v:String(d.recipientFio||''),t:'s'};
+  case 'recipientPhone':return {v:String(d.recipientPhone||''),t:'s'};
+  case 'documentDate':return {v:String(d.documentDate||''),t:'s'};
+  case 'status':return {v:String(d.status||''),t:'s'};
+  case 'deliveryType':return {v:String(d.deliveryType||''),t:'s'};
+  case 'express24':return {v:d.express24?'Да':'',t:'s'};
+  case 'precomanda':return {v:d.precomanda?'Да':'',t:'s'};
+  case 'specialCondition':return {v:String(d.specialCondition||''),t:'s'};
+  case 'totalValue':{const n=Number(d.totalValue);return Number.isFinite(n)&&String(d.totalValue||'').trim()!==''?{v:n,t:'n'}:{v:'',t:'s'};}
+  case 'createdByName':return {v:String(d.createdByName||''),t:'s'};
+  case 'createdBy':return {v:String(d.createdBy||''),t:'s'};
+  case 'createdAt':{const dt=deliveryReportDateValue(d);return dt?{v:dt,t:'d'}:{v:'',t:'s'};}
+  case 'date':return {v:String(d.date||''),t:'s'};
+  case 'dateTime':return {v:String(d.dateTime||''),t:'s'};
+  case 'requestNo':return {v:String(d.requestNo||''),t:'s'};
+  case 'deliveryRowCount':return {v:Number(d.deliveryRowCount)||'',t:'n'};
+  case 'showTotalCost':return {v:d.showTotalCost?'Да':'Нет',t:'s'};
+  case 'fridge_gt180':case 'fridge_lt180':case 'other_kbt':case 'mbt':case 'tv':case 'other_avit':return counts[source]?{v:counts[source],t:'n'}:{v:'',t:'s'};
+  case 'deliveryLabel':return {v:'magazin'+(d.deliveryType==='individual'&&String(d.specialCondition||'').trim()?' — '+String(d.specialCondition).trim():''),t:'s'};
+  case 'city':return {v:addressHasOrhei(d.recipientAddress)?'Город':'',t:'s'};
+  case 'blank':return {v:'',t:'s'};
+  default:{const m=source.match(/^(model|category|qty|cost)([1-6])$/);if(m){if(m[1]==='category'){const cat=deliveryItemCategoryName(d,'model'+m[2]);return {v:String(cat||''),t:'s'};}const raw=d[source]??'';if(raw===''||raw==null)return {v:'',t:'s'};if(m[1]==='qty'||m[1]==='cost'){const n=Number(raw);return Number.isFinite(n)?{v:n,t:'n'}:{v:String(raw),t:'s'};}return {v:String(raw),t:'s'};}return {v:'',t:'s'};}
+ }
+}
+
 function deliveryReportDateValue(d){
  if(d?.createdAt){
    const dt=new Date(Number(d.createdAt));
@@ -2398,12 +2459,13 @@ function deliveryReportDateValue(d){
 }
 function renderDelivery(c){
  if(!requirePermission('delivery.view'))return;
+ if(normalizeDeliverySequentialNumbers())save();
  const visible=state.deliveries.filter(d=>can('delivery.view.all')||state.user.login==='admin'||d.createdBy===state.user.login);
  const today=new Date();
  const isToday=d=>{const dt=deliveryReportDateValue(d);return !!dt&&dt.getFullYear()===today.getFullYear()&&dt.getMonth()===today.getMonth()&&dt.getDate()===today.getDate()};
  const waiting=visible.filter(d=>d.status!=='Доставлен').length,delivered=visible.filter(d=>d.status==='Доставлен').length;
  const own=state.deliveries.filter(d=>d.createdBy===state.user.login).length,createdToday=visible.filter(isToday).length;
- c.innerHTML=`<div class="page-head"><div><h1>Доставки</h1><div class="muted">Активные созданные доставки</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${can('delivery.report')?'<button class="btn" onclick="openDeliveryReportModal()">▤ Сформировать Отчёт</button>':''}${can('delivery.create.individual')?'<button class="btn" onclick="newIndividualDelivery()">＋ Создать Индивидуальную Доставку</button>':''}${can('delivery.create')?'<button class="btn primary" onclick="newDelivery()">＋ Создать доставку</button>':''}</div></div><div class="grid stats"><div class="stat"><div class="label">Ожидает доставки</div><div class="num">${waiting}</div></div><div class="stat"><div class="label">Доставлено</div><div class="num">${delivered}</div></div><div class="stat"><div class="label">Мои доставки</div><div class="num">${own}</div></div><div class="stat"><div class="label">Создано сегодня</div><div class="num">${createdToday}</div></div></div><div class="table-card delivery-list-card" style="margin-top:20px"><div class="toolbar"><input id="deliverySearch" placeholder="Поиск по создателю, категории, адресу..." oninput="filterDeliveries()"><select id="deliverySort" onchange="filterDeliveries()"><option value="new">Сначала новые</option><option value="old">Сначала старые</option></select></div><div id="deliveryTable"></div></div>`;filterDeliveries()}
+ c.innerHTML=`<div class="page-head"><div><h1>Доставки</h1><div class="muted">Активные созданные доставки</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${can('delivery.report')?'<button class="btn" onclick="openDeliveryReportModal()">▤ Сформировать Отчёт</button><button class="btn danger" onclick="openDeliveryDeleteRangeModal()">⌫ Удалить за период</button>':''}${can('delivery.create.individual')?'<button class="btn" onclick="newIndividualDelivery()">＋ Создать Индивидуальную Доставку</button>':''}${can('delivery.create')?'<button class="btn primary" onclick="newDelivery()">＋ Создать доставку</button>':''}</div></div><div class="grid stats"><div class="stat"><div class="label">Ожидает доставки</div><div class="num">${waiting}</div></div><div class="stat"><div class="label">Доставлено</div><div class="num">${delivered}</div></div><div class="stat"><div class="label">Мои доставки</div><div class="num">${own}</div></div><div class="stat"><div class="label">Создано сегодня</div><div class="num">${createdToday}</div></div></div><div class="table-card delivery-list-card" style="margin-top:20px"><div class="toolbar"><input id="deliverySearch" placeholder="Поиск по создателю, категории, адресу..." oninput="filterDeliveries()"><select id="deliverySort" onchange="filterDeliveries()"><option value="new">Сначала новые</option><option value="old">Сначала старые</option></select></div><div id="deliveryTable"></div></div>`;filterDeliveries()}
 function filterDeliveries(){
  const q=(document.getElementById('deliverySearch')?.value||'').toLocaleLowerCase('ru-RU'),sort=document.getElementById('deliverySort')?.value;
  let a=state.deliveries.filter(d=>can('delivery.view.all')||state.user.login==='admin'||d.createdBy===state.user.login).filter(d=>(JSON.stringify(d)+' '+deliveryCategoryDisplay(d)).toLocaleLowerCase('ru-RU').includes(q));
@@ -2606,12 +2668,29 @@ function syncDeliveryModeCheckboxes(mode){
  if(mode==='express'&&express.checked)pre.checked=false;
  if(mode==='precomanda'&&pre.checked)express.checked=false;
 }
+function normalizeDeliverySequentialNumbers(){
+ const list=Array.isArray(state.deliveries)?state.deliveries:[];
+ const ordered=[...list].sort((a,b)=>{
+  const da=deliveryReportDateValue(a)?.getTime()||Number(a?.createdAt)||Number(a?.id)||0;
+  const db=deliveryReportDateValue(b)?.getTime()||Number(b?.createdAt)||Number(b?.id)||0;
+  return da-db || String(a?.id||'').localeCompare(String(b?.id||''));
+ });
+ let changed=false;
+ ordered.forEach((d,i)=>{const n=String(i+1);if(String(d.number??'')!==n||String(d.requestNo??'')!==n){d.number=n;d.requestNo=n;changed=true;}});
+ return changed;
+}
+function localDateInputValue(date){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}
+function deliveryReportDateBounds(){
+ const dates=(state.deliveries||[]).map(d=>deliveryReportDateValue(d)).filter(Boolean).sort((a,b)=>a-b);
+ return dates.length?{first:dates[0],last:dates[dates.length-1]}:null;
+}
 function createDelivery(e,isIndividual=false){
  e.preventDefault();
  if(!prepareDeliveryCapacity())return;
  if(blockDeliveryCreationForUnknownCategories())return;
  const f=new FormData(e.target),now=new Date(),id=Date.now();
- const number='AV-D-'+now.getFullYear()+'-'+String(state.deliveries.length+1).padStart(5,'0');
+ normalizeDeliverySequentialNumbers();
+ const number=String((state.deliveries||[]).length+1);
  const useToday=f.get('useTodayDate')==='on';
  const manualDate=String(f.get('documentDate')||'').trim();
  const documentDate=useToday?now.toLocaleDateString('ru-RU'):manualDate;
@@ -2649,13 +2728,39 @@ function createDelivery(e,isIndividual=false){
  }
  d.totalValue=total>0?total.toFixed(2):'';
  state.deliveries.unshift(d);
- log('Создание доставки',number,number,'Создана новая доставка');
+ normalizeDeliverySequentialNumbers();
+ d.number=String(d.number||number);d.requestNo=d.number;
+ log('Создание доставки',d.number,d.number,'Создана новая доставка');
  save();closeModal();renderDelivery(document.getElementById('content'))
 }
+function openDeliveryDeleteRangeModal(){
+ if(!requirePermission('delivery.report'))return;
+ const bounds=deliveryReportDateBounds();
+ if(!bounds){alert('Нет доставок для удаления.');return;}
+ const first=localDateInputValue(bounds.first),last=localDateInputValue(bounds.last);
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Удаление доставок за период</h2><div class="muted">Будут удалены доставки по дате создания, включая обе выбранные даты.</div></div><button class="close" onclick="closeModal()">×</button></div><form onsubmit="deleteDeliveriesByDateRange(event)"><div class="form-grid"><label>Дата с<input id="deliveryDeleteFrom" type="date" value="${first}" min="${first}" max="${last}" required></label><label>Дата по<input id="deliveryDeleteTo" type="date" value="${last}" min="${first}" max="${last}" required></label></div><div class="card" style="margin-top:14px"><b>Всего доставок сейчас: ${(state.deliveries||[]).length}</b><div class="muted" style="margin-top:6px">По умолчанию выбраны даты от самой старой до самой новой доставки. После подтверждения восстановить удалённые записи обычным способом нельзя.</div></div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn danger">Удалить выбранные доставки</button></div></form>`;openModal();
+}
+function deleteDeliveriesByDateRange(e){
+ e?.preventDefault();if(!requirePermission('delivery.report'))return;
+ const fromValue=document.getElementById('deliveryDeleteFrom')?.value||'',toValue=document.getElementById('deliveryDeleteTo')?.value||'';
+ if(!fromValue||!toValue||fromValue>toValue){alert('Проверьте выбранный период.');return;}
+ const from=new Date(fromValue+'T00:00:00'),to=new Date(toValue+'T23:59:59.999');
+ const matched=(state.deliveries||[]).filter(d=>{const dt=deliveryReportDateValue(d);return dt&&dt>=from&&dt<=to;});
+ if(!matched.length){alert('За выбранный период доставок не найдено.');return;}
+ const confirmText=`Вы уверены, что хотите удалить ${matched.length} доставок за период ${fromValue} — ${toValue}? Это действие нельзя отменить.`;
+ if(!confirm(confirmText))return;
+ const removedIds=new Set(matched.map(d=>String(d.id)));
+ state.deliveries=(state.deliveries||[]).filter(d=>!removedIds.has(String(d.id)));
+ normalizeDeliverySequentialNumbers();
+ log('Удаление доставок за период',`${fromValue} — ${toValue}`,'',`Удалено доставок: ${matched.length}`);
+ save();closeModal();renderDelivery(document.getElementById('content'));
+ alert(`Удалено доставок: ${matched.length}. Номера оставшихся доставок перенумерованы по порядку.`);
+}
+
 function openDeliveryReportModal(){
  if(!requirePermission('delivery.report'))return
- const today=new Date(),first=new Date(today.getFullYear(),today.getMonth(),1),fmt=d=>d.toISOString().slice(0,10);
- document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Сформировать Отчёт</h2><div class="muted">В отчёт попадут доставки по дате создания, включая обе выбранные даты.</div></div><button class="close" onclick="closeModal()">×</button></div><form onsubmit="generateDeliveryReport(event)"><div class="form-grid"><label>С даты<input id="deliveryReportFrom" name="from" type="date" value="${fmt(first)}" required></label><label>По дату<input id="deliveryReportTo" name="to" type="date" value="${fmt(today)}" required></label></div><div class="card" style="margin-top:14px"><div class="muted">После формирования отчёт откроется для просмотра. Скачивание будет доступно отдельной кнопкой.</div></div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Сформировать и открыть</button></div></form>`;openModal();
+ const today=new Date(),bounds=deliveryReportDateBounds(),first=bounds?.first||new Date(today.getFullYear(),today.getMonth(),1),last=bounds?.last||today,fmt=d=>localDateInputValue(d);
+ document.getElementById('modalBox').innerHTML=`<div class="modal-head"><div><h2 style="margin:0">Сформировать Отчёт</h2><div class="muted">В отчёт попадут доставки по дате создания, включая обе выбранные даты.</div></div><button class="close" onclick="closeModal()">×</button></div><form onsubmit="generateDeliveryReport(event)"><div class="form-grid"><label>С даты<input id="deliveryReportFrom" name="from" type="date" value="${fmt(first)}" required></label><label>По дату<input id="deliveryReportTo" name="to" type="date" value="${fmt(last)}" required></label></div><div class="card" style="margin-top:14px"><div class="muted">После формирования отчёт откроется для просмотра. Скачивание будет доступно отдельной кнопкой.</div></div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Сформировать и открыть</button></div></form>`;openModal();
 }
 function closeDeliveryReportPreview(){
  window.pendingDeliveryReport=null;
@@ -2676,56 +2781,45 @@ function showDeliveryReportPreview(report,rows,from,to){
  openModal();
 }
 async function generateDeliveryReport(e){
- e.preventDefault();if(!requirePermission('delivery.report'))return
+ e.preventDefault();if(!requirePermission('delivery.report'))return;
  const from=new Date((document.getElementById('deliveryReportFrom')?.value||'')+'T00:00:00'),to=new Date((document.getElementById('deliveryReportTo')?.value||'')+'T23:59:59.999');
- if(Number.isNaN(from.getTime())||Number.isNaN(to.getTime())||from>to){alert('Проверьте выбранный период.');return}
- const rows=state.deliveries.filter(d=>{const dt=deliveryReportDateValue(d);return dt&&dt>=from&&dt<=to});
+ if(Number.isNaN(from.getTime())||Number.isNaN(to.getTime())||from>to){alert('Проверьте выбранный период.');return;}
+ const rows=state.deliveries.filter(d=>{const dt=deliveryReportDateValue(d);return dt&&dt>=from&&dt<=to;});
  try{
   const response=await fetch('assets/delivery-report-template.xlsx',{cache:'no-store'});if(!response.ok)throw new Error('Не удалось загрузить шаблон Excel');
-  const wb=XLSX.read(await response.arrayBuffer(),{type:'array',cellStyles:true}),ws=wb.Sheets[wb.SheetNames[0]];
+  const wb=XLSX.read(await response.arrayBuffer(),{type:'array',cellStyles:true}),ws=wb.Sheets[wb.SheetNames[0]],columns=deliveryReportColumns();
   const startRow=8,range=XLSX.utils.decode_range(ws['!ref']||'A1:T323');
   for(let r=startRow;r<=range.e.r;r++)for(let c=0;c<20;c++){const a=XLSX.utils.encode_cell({r,c});if(ws[a]){ws[a].v='';ws[a].w='';ws[a].t='s';}}
+  // If the owner edited headers, flatten the two grouped headings so each column can have its own label.
+  const originalLabels=DEFAULT_DELIVERY_REPORT_COLUMNS.map(x=>x.label);
+  const headersChanged=columns.some((c,i)=>String(c.label||'')!==originalLabels[i]);
+  if(headersChanged){
+   ws['!merges']=(ws['!merges']||[]).filter(m=>!(m.s.r===6&&m.s.c===4&&m.e.r===6&&m.e.c===6)&&!(m.s.r===6&&m.s.c===8&&m.e.r===6&&m.e.c===9));
+   for(let c=0;c<20;c++){const a=XLSX.utils.encode_cell({r:6,c}),old=ws[a]||{};ws[a]={...old,v:String(columns[c]?.label||''),t:'s'};const sub=XLSX.utils.encode_cell({r:7,c});if(ws[sub]){ws[sub].v='';ws[sub].t='s';}}
+  }
   for(let i=0;i<rows.length;i++){
    const d=rows[i],r=startRow+i,cell=c=>XLSX.utils.encode_cell({r,c}),dt=deliveryReportDateValue(d)||from;
-   const put=(col,value,type)=>{const a=cell(col),old=ws[a]||{};ws[a]={...old,v:value,t:type};};
    const counts={fridge_gt180:0,fridge_lt180:0,other_kbt:0,mbt:0,tv:0,other_avit:0};
    for(let j=1;j<=6;j++){
     const model=String(d['model'+j]||'').trim();if(!model)continue;
-    const qty=Math.max(1,Number(d['qty'+j]||1));
-    const cat=deliveryItemCategoryName(d,'model'+j);
-    const names=String(cat||'').split(',').map(x=>x.trim()).filter(Boolean);
-    let field='';for(const name of names){field=getReportBindingForCategory(name);if(field)break;}
-    if(field&&counts[field]!==undefined)counts[field]+=qty;
+    const qty=Math.max(1,Number(d['qty'+j]||1));const cat=deliveryItemCategoryName(d,'model'+j);const names=String(cat||'').split(',').map(x=>x.trim()).filter(Boolean);let field='';for(const name of names){field=getReportBindingForCategory(name);if(field)break;}if(field&&counts[field]!==undefined)counts[field]+=qty;
    }
-   put(0,new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()),'d');
-   put(1,i+1,'n');
-   put(2,'Orhei','s');
-   put(3,String(d.recipientAddress||''),'s');
-   if(counts.fridge_gt180)put(4,counts.fridge_gt180,'n');
-   if(counts.fridge_lt180)put(5,counts.fridge_lt180,'n');
-   if(counts.other_kbt)put(6,counts.other_kbt,'n');
-   if(counts.mbt)put(7,counts.mbt,'n');
-   if(counts.tv)put(8,counts.tv,'n');
-   if(counts.other_avit)put(9,counts.other_avit,'n');
-   // Колонка километража (10) оставляется пустой: данные позже предоставит внешний сервис.
-   // 11,12,14 intentionally remain empty: fuel data is not supplied by deliveries.
-   put(15,'magazin'+(d.deliveryType==='individual'&&String(d.specialCondition||'').trim()?' — '+String(d.specialCondition).trim():''),'s');
-   if(addressHasOrhei(d.recipientAddress))put(16,'Город','s');
-   // 17,18,19 intentionally remain empty.
+   for(let col=0;col<20;col++){
+    const source=columns[col]?.source||'blank',item=deliveryReportColumnValue(d,source,i,dt,counts),a=cell(col),old=ws[a]||{};
+    if(item.v instanceof Date){ws[a]={...old,v:item.v,t:'d',z:'dd.mm.yyyy'};}else ws[a]={...old,v:item.v,t:item.t||'s'};
+   }
   }
   ws['!ref']='A1:T'+Math.max(startRow+rows.length,9);
   const out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellStyles:true}),blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   let previewHtml='';try{previewHtml=XLSX.utils.sheet_to_html(ws,{header:'',footer:'',editable:false});}catch(previewErr){console.warn('Не удалось построить HTML-предпросмотр отчёта',previewErr)}
-  const report={blob,filename:`Доставки_${iso(from)}_${iso(to)}.xlsx`,previewHtml};
-  log('Формирование отчёта доставок',`${iso(from)} — ${iso(to)}`,'',`Доставок в отчёте: ${rows.length}`);
-  showDeliveryReportPreview(report,rows,from,to);
- }catch(err){console.error(err);alert('Не удалось сформировать отчёт: '+(err.message||'ошибка'))}
+  const report={blob,filename:`Доставки_${iso(from)}_${iso(to)}.xlsx`,previewHtml};log('Формирование отчёта доставок',`${iso(from)} — ${iso(to)}`,'',`Доставок в отчёте: ${rows.length}`);showDeliveryReportPreview(report,rows,from,to);
+ }catch(err){console.error(err);alert('Не удалось сформировать отчёт: '+(err.message||'ошибка'));}
 }
 function sendDeliveryDoc(id){if(!requirePermission('delivery.send'))return;const d=state.deliveries.find(x=>x.id===id);if(!d)return;log('Отправка документа',d.number,d.number,'Документ подготовлен к отправке');save();alert('Документ доставки подготовлен к отправке.')}
 function openDeliveryDoc(id){if(!requirePermission('delivery.view'))return;currentDeliveryDocId=id;renderDeliveryDocument(id,false)}
 function canDeleteDeliveryRecord(delivery){if(!delivery||!can('delivery.delete'))return false;if(delivery.status==='Доставлен'&&!can('delivery.delete.delivered'))return false;return true}
-function startDeliveryDeleteTimer(id){const delivery=state.deliveries.find(x=>String(x.id)===String(id));if(!canDeleteDeliveryRecord(delivery)){alert(delivery?.status==='Доставлен'&&!can('delivery.delete.delivered')?'Для удаления доставленной доставки нужно дополнительное право.':'Недостаточно прав');return}const btn=document.getElementById('deleteDeliveryBtn_'+id);if(!btn)return;if(window.deliveryDeleteTimers?.[id]){clearInterval(window.deliveryDeleteTimers[id].interval);clearTimeout(window.deliveryDeleteTimers[id].timeout);delete window.deliveryDeleteTimers[id];btn.textContent='Удалить';btn.classList.remove('active');return}window.deliveryDeleteTimers=window.deliveryDeleteTimers||{};let seconds=15;btn.classList.add('active');btn.textContent='Удаление через '+seconds+' с';const interval=setInterval(()=>{seconds--;const cur=document.getElementById('deleteDeliveryBtn_'+id);if(cur)cur.textContent='Удаление через '+seconds+' с'},1000);const timeout=setTimeout(()=>{clearInterval(interval);delete window.deliveryDeleteTimers[id];const current=state.deliveries.find(x=>String(x.id)===String(id));if(!canDeleteDeliveryRecord(current)){if(document.getElementById('deliveryTable'))filterDeliveries();return}state.deliveries=state.deliveries.filter(x=>String(x.id)!==String(id));save();if(document.getElementById('deliveryTable'))refreshDeliveryPage()},15000);window.deliveryDeleteTimers[id]={interval,timeout}}
+function startDeliveryDeleteTimer(id){const delivery=state.deliveries.find(x=>String(x.id)===String(id));if(!canDeleteDeliveryRecord(delivery)){alert(delivery?.status==='Доставлен'&&!can('delivery.delete.delivered')?'Для удаления доставленной доставки нужно дополнительное право.':'Недостаточно прав');return}const btn=document.getElementById('deleteDeliveryBtn_'+id);if(!btn)return;if(window.deliveryDeleteTimers?.[id]){clearInterval(window.deliveryDeleteTimers[id].interval);clearTimeout(window.deliveryDeleteTimers[id].timeout);delete window.deliveryDeleteTimers[id];btn.textContent='Удалить';btn.classList.remove('active');return}window.deliveryDeleteTimers=window.deliveryDeleteTimers||{};let seconds=15;btn.classList.add('active');btn.textContent='Удаление через '+seconds+' с';const interval=setInterval(()=>{seconds--;const cur=document.getElementById('deleteDeliveryBtn_'+id);if(cur)cur.textContent='Удаление через '+seconds+' с'},1000);const timeout=setTimeout(()=>{clearInterval(interval);delete window.deliveryDeleteTimers[id];const current=state.deliveries.find(x=>String(x.id)===String(id));if(!canDeleteDeliveryRecord(current)){if(document.getElementById('deliveryTable'))filterDeliveries();return}state.deliveries=state.deliveries.filter(x=>String(x.id)!==String(id));normalizeDeliverySequentialNumbers();save();if(document.getElementById('deliveryTable'))refreshDeliveryPage()},15000);window.deliveryDeleteTimers[id]={interval,timeout}}
 function renderDeliveryDocument(id,edit=false){const d=state.deliveries.find(x=>x.id===id);if(!d)return;document.getElementById('content').innerHTML=`<div class="doc-toolbar"><button class="btn" onclick="navigate('delivery')">← Назад</button>${can('delivery.print')?'<button class="btn primary" onclick="window.print()">Печать</button>':''}${can('delivery.send')?'<button class="btn" onclick="sendDeliveryDoc('+d.id+')">Отправить документ</button>':''}${can('deliveryTemplate.manage')&&edit?'<button class="btn" onclick="openDeliveryDoc('+d.id+')">Готово</button>':''}</div><div class="document-shell"><div class="document-page" id="deliveryDocumentPage" style="${edit?'':'transform:scale('+getTemplatePrintScale('delivery')/100+');transform-origin:top left;'}"><img src="${getDeliveryBackground()}">${Object.keys(getDeliveryLayout()).map(k=>renderDeliveryDocField(d,k,edit)).join('')}</div></div>${edit?deliveryLayoutEditor(d):''}${edit?'<div class="layout-hint">Перетаскивайте поля мышкой прямо по бланку. Настройки сохраняются как стандарт для всех пользователей и документов доставки.</div>':''}`;if(edit)enableDeliveryDrag();log(edit?'Открытие редактора шаблона доставки':'Открытие документа',d.number,d.number);save();applyAllDeliveryAdaptiveText(document.getElementById('deliveryDocumentPage'));}
 function getDeliveryTransferRoot(k){const l=getDeliveryLayout(),f=l[k];if(!f)return k;return f.transferRoot||f.continuationOf||k}
 function getDeliveryTransferFields(root){const l=getDeliveryLayout();return Object.entries(l).filter(([key,f])=>f&&getDeliveryTransferRoot(key)===root).sort((a,b)=>(Number(a[1].transferOrder||1)-Number(b[1].transferOrder||1)))}
