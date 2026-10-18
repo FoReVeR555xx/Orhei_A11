@@ -3572,41 +3572,6 @@ function toggleEventActive(){if(!isSiteOwner()){alert('Только владел
 #modal.show #modalBox #emailLogsScroll{touch-action:pan-x pan-y!important;overflow-y:hidden!important;max-height:none!important;overscroll-behavior-x:contain!important;}
 @media(max-width:700px){#modal.show{padding:6px!important;}#modal.show #modalBox{max-height:calc(100vh - 12px)!important;max-height:calc(100dvh - 12px)!important;border-radius:12px!important;}#modal.show #modalBox .modal-head{position:sticky!important;top:0!important;z-index:15!important;}#modal.show #modalBox .form-actions{margin-left:-14px!important;margin-right:-14px!important;padding-left:14px!important;padding-right:14px!important;}}
 </style>
-<style>
-
-/* Delivery list: compact columns so category/address do not push actions off-screen. */
-.delivery-list-card #deliveryTable .table-wrap{width:100%;max-width:100%;overflow-x:hidden!important;}
-.delivery-list-card #deliveryTable table{width:100%!important;min-width:0!important;table-layout:fixed!important;}
-.delivery-list-card #deliveryTable th,.delivery-list-card #deliveryTable td{padding:8px 7px;white-space:normal;overflow-wrap:anywhere;vertical-align:middle;}
-.delivery-list-card #deliveryTable th:nth-child(1){width:112px;}
-.delivery-list-card #deliveryTable th:nth-child(2){width:90px;}
-.delivery-list-card #deliveryTable th:nth-child(3){width:145px;}
-.delivery-list-card #deliveryTable th:nth-child(4){width:150px;}
-.delivery-list-card #deliveryTable th:nth-child(5){width:112px;}
-.delivery-list-card #deliveryTable th:nth-child(6){width:55px;}
-.delivery-list-card #deliveryTable th:nth-child(7){width:190px;}
-.delivery-list-card #deliveryTable td:nth-child(3) b,
-.delivery-list-card #deliveryTable td:nth-child(4){display:block;overflow:hidden;text-overflow:ellipsis;}
-.delivery-list-card #deliveryTable .actions{display:flex;gap:4px;flex-wrap:wrap;}
-.delivery-list-card #deliveryTable .actions .btn{font-size:11px;padding:6px 7px;white-space:normal;line-height:1.15;}
-@media(max-width:700px){
- .delivery-list-card #deliveryTable .table-wrap{overflow-x:hidden!important;}
- .delivery-list-card #deliveryTable table{min-width:0!important;width:100%!important;table-layout:fixed!important;font-size:11px;}
- .delivery-list-card #deliveryTable th,.delivery-list-card #deliveryTable td{padding:7px 4px;font-size:10px;}
- .delivery-list-card #deliveryTable th:nth-child(1){width:18%;}
- .delivery-list-card #deliveryTable th:nth-child(2),.delivery-list-card #deliveryTable td:nth-child(2),
- .delivery-list-card #deliveryTable th:nth-child(6),.delivery-list-card #deliveryTable td:nth-child(6){display:none!important;}
- .delivery-list-card #deliveryTable th:nth-child(3){width:22%;}
- .delivery-list-card #deliveryTable th:nth-child(4){width:22%;}
- .delivery-list-card #deliveryTable th:nth-child(5){width:19%;}
- .delivery-list-card #deliveryTable th:nth-child(7){width:19%;}
- .delivery-list-card #deliveryTable .delivery-status-select{width:100%;min-width:0!important;padding:5px 1px;font-size:10px;}
- .delivery-list-card #deliveryTable .actions{display:flex;flex-direction:column;gap:4px;align-items:stretch;}
- .delivery-list-card #deliveryTable .actions .btn{width:100%;min-width:0;padding:6px 3px;font-size:10px;line-height:1.1;}
- .delivery-list-card #deliveryTable td:nth-child(3) b,.delivery-list-card #deliveryTable td:nth-child(4){display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;white-space:normal;overflow:hidden;overflow-wrap:anywhere;}
-}
-
-</style>
 </body>
 </html>
 
