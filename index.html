@@ -1125,6 +1125,14 @@ body.app-active { overflow:hidden !important; }
 .delivery-list-card .delivery-status-select option{background:#0b1724;color:#eaf2fb}
 @media(max-width:700px){.delivery-list-card .table-wrap{max-width:100%!important;overflow-x:auto!important}.delivery-list-card .table-wrap td:last-child{min-width:0;max-width:none}.delivery-list-card .actions{max-width:none}.delivery-list-card .actions .btn{font-size:12px;padding:7px 10px}}
 </style>
+<style id="delivery-category-address-spacing-only">
+/* Only tighten the gap between the product-category and address columns in Work > Deliveries. Keep all columns and action buttons unchanged. */
+#deliveryTable .table-wrap > table { width: max-content !important; }
+#deliveryTable .table-wrap > table th:nth-child(3),
+#deliveryTable .table-wrap > table td:nth-child(3) { padding-right: 3px !important; }
+#deliveryTable .table-wrap > table th:nth-child(4),
+#deliveryTable .table-wrap > table td:nth-child(4) { padding-left: 3px !important; }
+</style>
 </head>
 <body>
 <div id="login" class="login">
