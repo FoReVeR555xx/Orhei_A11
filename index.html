@@ -1301,6 +1301,7 @@ const supabaseClient = (window.supabase && SUPABASE_URL && SUPABASE_PUBLISHABLE_
 const CLOUD_STATE_ID='main';
 let cloudReady=false;
 let cloudSaveTimer=null;
+let cloudRealtimeChannel=null, cloudSyncPollTimer=null, cloudSyncBusy=false, cloudPushBusy=false, cloudAuthUserId=null, lastCloudPayloadJson=null, lastCloudUpdatedAt=null, currentPage='service', remoteRenderPending=false;
 function cloudEmail(login){ return String(login||'').trim().toLowerCase()+'@bomba.local'; }
 function cloudSafeState(){
   const clean=JSON.parse(JSON.stringify(state));
@@ -1319,15 +1320,14 @@ function cloudTimestamp(value){
   else d=new Date(value||Date.now());
   return Number.isNaN(d.getTime())?new Date().toISOString():d.toISOString();
 }
+const CLOUD_PAYLOAD_KEYS=['sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','groups','permissions','siteSettings','eventSettings','announcements','tabOrders'];
+function stableCloudJson(value){if(Array.isArray(value))return '['+value.map(stableCloudJson).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+stableCloudJson(value[k])).join(',')+'}';return JSON.stringify(value)}
+function applyCloudPayload(payload){if(!payload||typeof payload!=='object')return;CLOUD_PAYLOAD_KEYS.forEach(k=>{if(payload[k]!==undefined)state[k]=payload[k]});lastCloudPayloadJson=stableCloudJson(payload)}
 async function loadCloudState(){
   if(!supabaseClient) return false;
-  const {data,error}=await supabaseClient.from('app_state').select('payload').eq('id',CLOUD_STATE_ID).maybeSingle();
+  const {data,error}=await supabaseClient.from('app_state').select('payload,updated_at,updated_by').eq('id',CLOUD_STATE_ID).maybeSingle();
   if(error) throw error;
-  if(data?.payload && Object.keys(data.payload).length){
-    const p=data.payload;
-    ['sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','groups','permissions','siteSettings','eventSettings','announcements','tabOrders'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
-    return true;
-  }
+  if(data?.payload && Object.keys(data.payload).length){applyCloudPayload(data.payload);lastCloudUpdatedAt=data.updated_at||null;return true}
   return false;
 }
 async function loadCloudCollections(){
@@ -1414,20 +1414,27 @@ async function persistNormalizedCollection(table,items,kind,previousJson){
 }
 async function pushCloudStateNow(){
   if(!supabaseClient || !cloudReady) return false;
-  const {data:{user}}=await supabaseClient.auth.getUser();
-  if(!user) return false;
-  const servicesJson=await persistNormalizedCollection('services',state.services||[],'service',lastCloudServicesJson);
-  const ordersJson=await persistNormalizedCollection('orders',state.deliveries||[],'order',lastCloudOrdersJson);
-  const {error}=await supabaseClient.from('app_state').upsert({id:CLOUD_STATE_ID,payload:cloudSafeState(),updated_at:new Date().toISOString(),updated_by:user.id});
-  if(error){ console.error('Supabase save failed',error); throw error; }
-  lastCloudServicesJson=servicesJson;
-  lastCloudOrdersJson=ordersJson;
-  return true;
+  if(cloudPushBusy){pushCloudState();return false;}
+  cloudPushBusy=true;
+  try{
+    const {data:{user}}=await supabaseClient.auth.getUser();
+    if(!user) return false;
+    const servicesJson=await persistNormalizedCollection('services',state.services||[],'service',lastCloudServicesJson);
+    const ordersJson=await persistNormalizedCollection('orders',state.deliveries||[],'order',lastCloudOrdersJson);
+    const savedAt=new Date().toISOString();
+    const {error}=await supabaseClient.from('app_state').upsert({id:CLOUD_STATE_ID,payload:cloudSafeState(),updated_at:savedAt,updated_by:user.id});
+    if(error){ console.error('Supabase save failed',error); throw error; }
+    lastCloudServicesJson=servicesJson;
+    lastCloudOrdersJson=ordersJson;
+    lastCloudUpdatedAt=savedAt;
+    lastCloudPayloadJson=stableCloudJson(cloudSafeState());
+    return true;
+  }finally{cloudPushBusy=false;}
 }
 function pushCloudState(){
   if(!supabaseClient || !cloudReady) return;
   clearTimeout(cloudSaveTimer);
-  cloudSaveTimer=setTimeout(async()=>{ try{ await pushCloudStateNow(); }catch(e){ console.error('Supabase save failed',e); } },250);
+  cloudSaveTimer=setTimeout(async()=>{ cloudSaveTimer=null; try{ await pushCloudStateNow(); }catch(e){ console.error('Supabase save failed',e); } },250);
 }
 const FIXED_ACCOUNTS={
   Haier:{name:'Haier',group:'Продажи',permissions:['service.view','service.create','service.print','service.send','service.delete','delivery.view','delivery.create','delivery.print','delivery.send','delivery.delete','sales.view','sales.create','sales.delete','wallet.view']},
@@ -1496,6 +1503,72 @@ function setAccountBackground(login) {
   document.body.style.setProperty('--account-bg', ACCOUNT_BACKGROUNDS[login] || 'none');
 }
 
+function cloudHasOpenEditor(){
+ const active=document.activeElement;
+ if(active&&(/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)||active.isContentEditable))return true;
+ const modal=document.getElementById('modal');
+ return !!(modal&&modal.classList.contains('show'));
+}
+function renderAfterRemoteSync(){
+ if(!state.user||!currentPage)return;
+ if(cloudHasOpenEditor()){remoteRenderPending=true;return}
+ remoteRenderPending=false;
+ refreshNavigationPermissions();
+ render(currentPage);
+ setTimeout(checkDeliveryNotifications,120);
+}
+async function refreshCloudFromRemote(force=false){
+ if(!supabaseClient||!state.user||!cloudReady||cloudSyncBusy)return;
+ if(cloudSaveTimer||cloudPushBusy)return;
+ cloudSyncBusy=true;
+ try{
+  const {data:meta,error:metaError}=await supabaseClient.from('app_state').select('updated_at,updated_by').eq('id',CLOUD_STATE_ID).maybeSingle();
+  if(metaError)throw metaError;
+  if(!meta)return;
+  if(!force&&meta.updated_at&&lastCloudUpdatedAt&&Date.parse(meta.updated_at)===Date.parse(lastCloudUpdatedAt))return;
+  if(!force&&meta.updated_by&&cloudAuthUserId&&String(meta.updated_by)===String(cloudAuthUserId)){
+   lastCloudUpdatedAt=meta.updated_at||lastCloudUpdatedAt;return;
+  }
+  if(cloudSaveTimer||cloudPushBusy)return;
+  const {data,error}=await supabaseClient.from('app_state').select('payload,updated_at,updated_by').eq('id',CLOUD_STATE_ID).maybeSingle();
+  if(error)throw error;
+  if(!data?.payload)return;
+  const nextJson=stableCloudJson(data.payload);
+  if(!force&&nextJson===lastCloudPayloadJson){lastCloudUpdatedAt=data.updated_at||lastCloudUpdatedAt;return;}
+  applyCloudPayload(data.payload);
+  lastCloudUpdatedAt=data.updated_at||meta.updated_at||null;
+  await loadCloudCollections();
+  await syncCloudProfiles();
+  renderAfterRemoteSync();
+ }catch(e){console.warn('Shared cloud refresh failed:',e?.message||e)}finally{cloudSyncBusy=false}
+}
+function stopCloudLiveSync(){
+ if(cloudRealtimeChannel&&supabaseClient){try{supabaseClient.removeChannel(cloudRealtimeChannel)}catch(_){}}
+ cloudRealtimeChannel=null;
+ if(cloudSyncPollTimer)clearInterval(cloudSyncPollTimer);
+ cloudSyncPollTimer=null;
+ cloudAuthUserId=null;
+}
+function startCloudLiveSync(authUserId){
+ stopCloudLiveSync();cloudAuthUserId=authUserId||null;
+ if(!supabaseClient||!state.user)return;
+ try{
+  cloudRealtimeChannel=supabaseClient.channel('orhei-shared-state-'+String(authUserId||'session'))
+   .on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{
+    const row=payload?.new||{};
+    if(row.updated_by&&cloudAuthUserId&&String(row.updated_by)===String(cloudAuthUserId))return;
+    refreshCloudFromRemote();
+   })
+   .on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>refreshCloudFromRemote())
+   .on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>refreshCloudFromRemote())
+   .on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>refreshCloudFromRemote(true))
+   .subscribe(status=>{if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('Supabase Realtime status:',status)});
+ }catch(e){console.warn('Realtime subscription failed; polling fallback remains active:',e)}
+ if(cloudSyncPollTimer)clearInterval(cloudSyncPollTimer);
+ cloudSyncPollTimer=setInterval(()=>{if(!document.hidden&&state.user)refreshCloudFromRemote()},5000);
+}
+document.addEventListener('focusout',()=>{if(remoteRenderPending&&!cloudHasOpenEditor())setTimeout(renderAfterRemoteSync,250)});
+
 async function login(e){
  e.preventDefault();
  const u=document.getElementById('loginUser').value.trim(), p=document.getElementById('loginPass').value;
@@ -1505,6 +1578,7 @@ async function login(e){
    const {data,error}=await supabaseClient.auth.signInWithPassword({email:cloudEmail(u),password:p});
    if(error) throw error;
    const cloudUser=data.user;
+   cloudAuthUserId=cloudUser.id;
    const hadCloud=await loadCloudState();
    ensurePermissionCatalog();
    await loadCloudCollections();
@@ -1528,6 +1602,7 @@ async function login(e){
    document.body.classList.add('app-active');
    startStorageMonitor();
    startAccountPresence();
+   startCloudLiveSync(cloudUser.id);
    window.scrollTo(0,0);
    document.getElementById('sideName').textContent=state.user.name;
    document.getElementById('topTitle').textContent=state.user.name+' ▾';
@@ -1559,6 +1634,7 @@ async function loadAccountPresence(){if(!state.user||!supabaseClient||accountPre
 function toggleAccountPresence(){const panel=document.getElementById('accountPresencePanel'),button=document.getElementById('topTitle');if(!panel||!button)return;const opening=panel.hidden;panel.hidden=!opening;button.setAttribute('aria-expanded',String(opening));if(accountPresenceRefreshTimer)clearInterval(accountPresenceRefreshTimer);accountPresenceRefreshTimer=null;if(opening){loadAccountPresence();accountPresenceRefreshTimer=setInterval(()=>{if(!panel.hidden)loadAccountPresence()},45000)}}
 document.addEventListener('click',e=>{const panel=document.getElementById('accountPresencePanel'),button=document.getElementById('topTitle');if(panel&&!panel.hidden&&!panel.contains(e.target)&&!button?.contains(e.target)){panel.hidden=true;button?.setAttribute('aria-expanded','false');if(accountPresenceRefreshTimer)clearInterval(accountPresenceRefreshTimer);accountPresenceRefreshTimer=null}});
 async function logout(){
+ stopCloudLiveSync();
  if(accountPresenceTimer)clearInterval(accountPresenceTimer);accountPresenceTimer=null;if(accountPresenceRefreshTimer)clearInterval(accountPresenceRefreshTimer);accountPresenceRefreshTimer=null;const presencePanel=document.getElementById('accountPresencePanel');if(presencePanel)presencePanel.hidden=true;document.getElementById('topTitle')?.setAttribute('aria-expanded','false');
  hideStorageMonitor();
  if(supabaseClient&&state.user){try{await supabaseClient.rpc('mark_my_account_offline')}catch(_){}}
@@ -1576,7 +1652,7 @@ async function logout(){
 document.getElementById('loginForm').addEventListener('submit',login);
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));
 const titles={autoWriteoffSettings:'Авто-Списание',serviceAct:'Сервис-Акт',productOrders:'Заказ товара',events:'Мероприятия',eventSettings:'Мероприятие',service:'Сервис',delivery:'Доставки',sales:'Продажа',wallet:'Кошелёк',archive:'Архив',logs:'Логи',permissions:'Права',groups:'Группы',users:'Пользователи',template:'Сервис [Шаблон A4]',deliveryTemplate:'Доставки [Шаблон A4]',deliveryReportTemplate:'Шаблон отчёта доставок',decoding:'Расшифровка',reportBinding:'Привязка',announcements:'Объявления',tabOrder:'Порядок вкладок',settings:'Настройки сайта',tableSpacing:'Расстояние между столбцами',productOrderCategories:'Категории для заказов',emailSettings:'Настройки рассылки'};
-function navigate(page){const required=PAGE_PERMISSION[page];if((page==='settings'||page==='emailSettings'||page==='deliveryReportTemplate'||page==='autoWriteoffSettings')&&!isSiteOwner()||(page==='productOrderCategories'&&!canManageProductOrderCategories())||(page==='tableSpacing'&&!canManageTableSpacing())){alert('Недостаточно прав для этого раздела.');return}if(required&&!((page==='announcements'||page==='tabOrder')&&isSiteOwner())&&!requirePermission(required))return;document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=(state.user?.name||state.user?.login||'Аккаунт')+' ▾';render(page);setTimeout(checkDeliveryNotifications,120)}
+function navigate(page){const required=PAGE_PERMISSION[page];if((page==='settings'||page==='emailSettings'||page==='deliveryReportTemplate'||page==='autoWriteoffSettings')&&!isSiteOwner()||(page==='productOrderCategories'&&!canManageProductOrderCategories())||(page==='tableSpacing'&&!canManageTableSpacing())){alert('Недостаточно прав для этого раздела.');return}if(required&&!((page==='announcements'||page==='tabOrder')&&isSiteOwner())&&!requirePermission(required))return;currentPage=page;document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('topTitle').textContent=(state.user?.name||state.user?.login||'Аккаунт')+' ▾';render(page);setTimeout(checkDeliveryNotifications,120)}
 function render(page){
  const c=document.getElementById('content');
  const required=PAGE_PERMISSION[page];if((page==='settings'||page==='emailSettings'||page==='deliveryReportTemplate'||page==='autoWriteoffSettings')&&!isSiteOwner()||(page==='productOrderCategories'&&!canManageProductOrderCategories())||(page==='tableSpacing'&&!canManageTableSpacing())){c.innerHTML='<div class="empty">Недостаточно прав для этого раздела.</div>';return;}if(required&&!((page==='announcements'||page==='tabOrder')&&isSiteOwner())&&!can(required)){c.innerHTML='<div class="empty">Недостаточно прав для этого раздела.</div>';return;}
@@ -3499,7 +3575,7 @@ async function checkDeliveryNotifications(){
  }catch(err){console.warn('Не удалось обновить уведомления о доставках',err)}
  finally{deliveryNoticeCheckRunning=false;if(!siteSettings().deliveryNotificationsEnabled&&document.getElementById('modalBox')?.dataset.locked==='delivery-notice')closeDeliveryNoticeModal();if(deliveryDataChanged&&document.getElementById('deliveryTable'))refreshDeliveryPage();maybeShowDeliveryNotifications();setTimeout(maybeShowAnnouncementNotification,250)}
 }
-function openModal(){document.getElementById('modal').classList.add('show')}function closeModal(){const box=document.getElementById('modalBox');if(box?.dataset.locked==='delivery-notice'||box?.dataset.locked===ANNOUNCEMENT_NOTICE_LOCK)return;document.getElementById('modal').classList.remove('show')}document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()})
+function openModal(){document.getElementById('modal').classList.add('show')}function closeModal(){const box=document.getElementById('modalBox');if(box?.dataset.locked==='delivery-notice'||box?.dataset.locked===ANNOUNCEMENT_NOTICE_LOCK)return;document.getElementById('modal').classList.remove('show');if(remoteRenderPending)setTimeout(renderAfterRemoteSync,250)}document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()})
 setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleString('ru-RU'),1000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkDeliveryNotifications()});
 setInterval(()=>{if(!document.hidden)checkDeliveryNotifications()},30000);
