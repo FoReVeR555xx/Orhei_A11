@@ -684,7 +684,7 @@ body:has(#login.hidden) { overflow:hidden !important; }
 @media(max-width:700px){.event-board{border-radius:8px}.event-value-field{padding:0 1px;font-size:clamp(6px,1.8vw,10px)}.event-prize-slot:not(:has(img)){outline-width:1px}.event-live-intro{padding:11px}}
 
 
-.product-order-pending{background:rgba(245,158,11,.13)!important;border-left:4px solid #f59e0b!important}.product-order-rejected{background:rgba(220,38,38,.12)!important;border-left:4px solid #dc2626!important}.product-order-ordered{background:rgba(22,163,74,.12)!important;border-left:4px solid #16a34a!important}.product-order-hidden{opacity:.55;filter:grayscale(1)}.order-reason{min-width:180px}
+.auto-writeoff-button{background:#facc15!important;background-color:#facc15!important;border:1px solid #ca8a04!important;color:#241900!important;box-shadow:none!important}.auto-writeoff-service-row{background:transparent!important;box-shadow:inset 0 0 0 2px #eab308!important}.auto-writeoff-service-row td{border-top:1px solid #eab308!important;border-bottom:1px solid #eab308!important}.auto-writeoff-service-row td:first-child{border-left:2px solid #eab308!important}.auto-writeoff-service-row td:last-child{border-right:2px solid #eab308!important}.product-order-pending{background:rgba(245,158,11,.13)!important;border-left:4px solid #f59e0b!important}.product-order-rejected{background:rgba(220,38,38,.12)!important;border-left:4px solid #dc2626!important}.product-order-ordered{background:rgba(22,163,74,.12)!important;border-left:4px solid #16a34a!important}.product-order-hidden{opacity:.55;filter:grayscale(1)}.order-reason{min-width:180px}
 </style>
 
 
@@ -3175,7 +3175,7 @@ function startAutoWriteoff(id){if(!requirePermission('service.create'))return;co
 function renderService(c){
  if(!requirePermission('service.view'))return;
  let mine=state.services.filter(s=>can('service.view.all')||state.user.login==='admin'||s.createdBy===state.user.login);
- c.innerHTML=`<div class="page-head"><div><h1>Сервис</h1><div class="muted">Активные созданные сервисы · повторное нажатие на «Удалить» отменяет таймер</div></div>${can('service.create')?'<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="btn primary" style="background:#eab308;border-color:#ca8a04;color:#241900" onclick="openAutoWriteoffPicker()">Авто-Списание</button><button class="btn primary" onclick="newService()">＋ Создать сервис</button></div>':''}</div>
+ c.innerHTML=`<div class="page-head"><div><h1>Сервис</h1><div class="muted">Активные созданные сервисы · повторное нажатие на «Удалить» отменяет таймер</div></div>${can('service.create')?'<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="btn primary auto-writeoff-button" onclick="openAutoWriteoffPicker()">Авто-Списание</button><button class="btn primary" onclick="newService()">＋ Создать сервис</button></div>':''}</div>
  <div class="grid stats"><div class="stat"><div class="label">Всего сервисов</div><div class="num">${mine.length}</div></div><div class="stat"><div class="label">Создано сегодня</div><div class="num">${mine.filter(x=>x.date===new Date().toLocaleDateString('ru-RU')).length}</div></div><div class="stat"><div class="label">Активные</div><div class="num">${mine.length}</div></div><div class="stat"><div class="label">Мои документы</div><div class="num">${mine.length}</div></div></div>
  <div class="table-card" style="margin-top:20px"><div class="toolbar"><input id="serviceSearch" placeholder="Поиск по номеру, клиенту, IDNP..." oninput="filterServices()"><select id="serviceSort" onchange="filterServices()"><option value="new">Сначала новые</option><option value="old">Сначала старые</option></select></div><div id="serviceTable"></div></div>`;
  filterServices();
@@ -3185,7 +3185,7 @@ function filterServices(){
  let q=(document.getElementById('serviceSearch')?.value||'').toLowerCase(),sort=document.getElementById('serviceSort')?.value;
  let a=state.services.filter(s=>can('service.view.all')||state.user.login==='admin'||s.createdBy===state.user.login).filter(s=>JSON.stringify(s).toLowerCase().includes(q));
  a.sort((x,y)=>sort==='old'?x.createdAt-y.createdAt:y.createdAt-x.createdAt);
- document.getElementById('serviceTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>№ сервиса</th><th>Клиент</th><th>IDNP</th><th>Телефон</th><th>Создатель</th><th>Дата</th><th></th></tr></thead><tbody>${a.map(s=>`<tr style="${s.autoWriteoff?'background:#fef3c7':''}"><td><b style="${s.autoWriteoff?'color:#a16207':''}">${esc(s.autoWriteoff?'Авто-Списание':s.number)}</b></td><td>${esc(s.client)}</td><td>${esc(s.idnp)}</td><td>${esc(s.phone)}</td><td>${esc(s.createdByName)}</td><td>${esc(s.dateTime)}</td><td><div class="actions"><button class="btn small" onclick="openDoc(${s.id})">Открыть документ</button>${can('service.send')?'<button class="btn small primary" onclick="sendDoc('+s.id+')">Отправить</button>':''}${can('service.delete')?'<button id="deleteBtn_'+s.id+'" class="btn small delete-timer" onclick="startDeleteTimer('+s.id+')">Удалить</button>':''}</div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Сервисов пока нет</div>';applyTableColumnSpacing('serviceTable','service');
+ document.getElementById('serviceTable').innerHTML=a.length?`<div class="table-wrap"><table><thead><tr><th>№ сервиса</th><th>Клиент</th><th>IDNP</th><th>Телефон</th><th>Создатель</th><th>Дата</th><th></th></tr></thead><tbody>${a.map(s=>`<tr class="${s.autoWriteoff?'auto-writeoff-service-row':''}"><td><b style="${s.autoWriteoff?'color:#a16207':''}">${esc(s.autoWriteoff?'Авто-Списание':s.number)}</b></td><td>${esc(s.client)}</td><td>${esc(s.idnp)}</td><td>${esc(s.phone)}</td><td>${esc(s.createdByName)}</td><td>${esc(s.dateTime)}</td><td><div class="actions"><button class="btn small" onclick="openDoc(${s.id})">Открыть документ</button>${can('service.send')?'<button class="btn small primary" onclick="sendDoc('+s.id+')">Отправить</button>':''}${can('service.delete')?'<button id="deleteBtn_'+s.id+'" class="btn small delete-timer" onclick="startDeleteTimer('+s.id+')">Удалить</button>':''}</div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Сервисов пока нет</div>';applyTableColumnSpacing('serviceTable','service');
 }
 function startDeleteTimer(id){
  if(!can('service.delete')){alert('Недостаточно прав');return}
@@ -3199,8 +3199,9 @@ function startDeleteTimer(id){
  const timeout=setTimeout(()=>{
    clearInterval(interval);delete deleteTimers[id];
    const s=state.services.find(x=>x.id===id);if(!s)return;
-   state.services=state.services.filter(x=>x.id!==id);
-   log('Удаление сервиса',s.number,s.number,'Сервис удалён после 15-секундного таймера');save();
+   state.services=state.services.filter(x=>String(x.id)!==String(id));
+   if(s.autoWriteoff||s.autoWriteoffActId){const acts=siteSettings().serviceActs||[];siteSettings().serviceActs=acts.filter(a=>String(a.autoWriteoffServiceId||'')!==String(s.id)&&String(a.id||'')!==String(s.autoWriteoffActId||'')&&String(a.id||'')!=='sa-auto-'+String(s.id));}
+   log('Удаление сервиса',s.number,s.number,'Сервис удалён после 15-секундного таймера'+(s.autoWriteoff?' вместе со связанным Сервис-Актом':''));save();
    if(document.getElementById('serviceTable'))filterServices();
  },15000);
  deleteTimers[id]={interval,timeout};
