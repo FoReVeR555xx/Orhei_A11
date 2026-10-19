@@ -51,9 +51,19 @@ Deno.serve(async (req) => {
     const logins = [...new Set((Array.isArray(n.recipients) ? n.recipients : []).map((x: unknown) => str(x).trim().toLowerCase()).filter(Boolean))];
     for (const login of logins) {
       const email = str(recipients[login]).trim();
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { skipped++; continue; }
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        const reason = !email ? 'Письмо не отправлено: для аккаунта не указан адрес электронной почты в настройках рассылки.' : `Письмо не отправлено: некорректный адрес электронной почты «${email}».`;
+        const { data: priorFailure } = await supabase.from('email_send_logs').select('id').eq('recipient_login', login).eq('notification_id', str(n.id)).in('status', ['failed','skipped']).limit(1);
+        if (!priorFailure?.length) await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email || null, notification_id: str(n.id), email_type: 'notification', subject: `Письмо не отправлено: ${str(n.message).slice(0,160) || 'уведомление'}`, body: reason + `\n\nТекст уведомления: ${str(n.message).trim()}`, status: 'failed', error_message: reason });
+        skipped++; continue;
+      }
       const readBy = Array.isArray(n.readBy) ? n.readBy.map((x: unknown) => str(x).toLowerCase()) : [];
-      if (readBy.includes(login)) { skipped++; continue; }
+      if (readBy.includes(login)) {
+        const reason = 'Письмо не отправлено: внутреннее уведомление было прочитано до окончания задержки.';
+        const { data: priorReadLog } = await supabase.from('email_send_logs').select('id').eq('recipient_login', login).eq('notification_id', str(n.id)).eq('status', 'skipped').limit(1);
+        if (!priorReadLog?.length) await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email, notification_id: str(n.id), email_type: 'notification', subject: `Не отправлено (прочитано): ${str(n.message).slice(0,150)}`, body: reason + `\n\nТекст уведомления: ${str(n.message).trim()}`, status: 'skipped', error_message: reason });
+        skipped++; continue;
+      }
       if (now - created < delayMs) continue;
       if (!pendingByLogin.has(login)) pendingByLogin.set(login, []);
       pendingByLogin.get(login)!.push({ notification: n, login, email });
@@ -119,7 +129,11 @@ Deno.serve(async (req) => {
     const lastLogin = Date.parse(str(user.lastLoginAt || user.last_login_at || '')) || 0;
     let countQuery = supabase.from('email_delivery_events').select('id', { count: 'exact', head: true }).eq('recipient_login', login).gte('sent_at', lastLogin ? new Date(lastLogin).toISOString() : '1970-01-01T00:00:00.000Z');
     const { count: sentSinceLogin, error: countError } = await countQuery;
-    if (countError) { errors++; continue; }
+    if (countError) {
+      const reason = `Письмо не отправлено: не удалось проверить лимит рассылки. Причина Supabase: ${countError.message}`;
+      await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: candidates[0]?.email || str(recipients[login]), email_type: 'digest', subject: 'Ошибка проверки лимита рассылки', body: reason, status: 'failed', error_message: reason });
+      errors++; continue;
+    }
     if ((sentSinceLogin || 0) >= 3) {
       const email = candidates[0]?.email || str(recipients[login]);
       const reason = `Отправка пропущена: пользователь уже получил ${sentSinceLogin} письма после последнего входа. Последний вход: ${fmtTime(lastLogin)}. Письма после этого входа: ${sentSinceLogin}. Новые письма не отправляются до следующего входа.`;
@@ -136,7 +150,11 @@ Deno.serve(async (req) => {
     const claimed: typeof candidates = [];
     for (const item of candidates) {
       const { error: claimError } = await supabase.from('email_notification_sent').insert({ notification_id: str(item.notification.id), recipient_login: login, recipient_email: item.email });
-      if (claimError) { skipped++; continue; }
+      if (claimError) {
+        const reason = `Письмо не отправлено: не удалось зарезервировать уведомление для рассылки. Причина: ${claimError.message}`;
+        await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: item.email, notification_id: str(item.notification.id), email_type: 'notification', subject: 'Ошибка подготовки письма', body: reason, status: 'failed', error_message: reason });
+        skipped++; continue;
+      }
       claimed.push(item);
     }
     if (!claimed.length) continue;
