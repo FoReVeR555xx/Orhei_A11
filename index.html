@@ -2536,7 +2536,7 @@ function deliveryReportColumnValue(d,source,index,dt,counts,columnConfig={}){
   case 'express24':return {v:d.express24?'Да':'',t:'s'};
   case 'precomanda':return {v:d.precomanda?'Да':'',t:'s'};
   case 'rabla':return {v:d.rabla?'Да':'',t:'s'};
-  case 'specialCondition':return {v:String(d.specialCondition||''),t:'s'};
+  case 'specialCondition':return {v:d.deliveryType==='individual'?'':String(d.specialCondition||''),t:'s'};
   case 'pvz':return {v:String(d.pvz||''),t:'s'};
   case 'categoryGroup':case 'categoriesSource':{const cfg=columnConfig||{},ids=(Array.isArray(cfg.categoryIds)?cfg.categoryIds:[]).map(String),names=(Array.isArray(cfg.categoryNames)?cfg.categoryNames:[]).map(normalizeDeliveryCategoryText),matched=[];for(let j=1;j<=6;j++){const cat=String(deliveryItemCategoryName(d,'model'+j)||'');for(const part of cat.split(',').map(x=>x.trim()).filter(Boolean)){const entry=(state.deliveryCategories||[]).find(c=>normalizeDeliveryCategoryText(c.name)===normalizeDeliveryCategoryText(part));const chosen=(entry&&ids.includes(String(entry.id)))||names.includes(normalizeDeliveryCategoryText(part));if(chosen&&!matched.some(x=>normalizeDeliveryCategoryText(x)===normalizeDeliveryCategoryText(part)))matched.push(part);}}return source==='categoriesSource'?{v:matched.join('+'),t:'s'}:{v:matched.length?String(cfg.displayCategory||'').trim():'',t:'s'};}
   case 'totalValue':{const n=Number(d.totalValue);return Number.isFinite(n)&&String(d.totalValue||'').trim()!==''?{v:n,t:'n'}:{v:'',t:'s'};}
@@ -2549,7 +2549,7 @@ function deliveryReportColumnValue(d,source,index,dt,counts,columnConfig={}){
   case 'deliveryRowCount':return {v:Number(d.deliveryRowCount)||'',t:'n'};
   case 'showTotalCost':return {v:d.showTotalCost?'Да':'Нет',t:'s'};
   case 'fridge_gt180':case 'fridge_lt180':case 'other_kbt':case 'mbt':case 'tv':case 'other_avit':return counts[source]?{v:counts[source],t:'n'}:{v:'',t:'s'};
-  case 'deliveryLabel':{const label=String(d.pvz||'').trim()?'online':'magazin';return {v:label+(d.deliveryType==='individual'&&String(d.specialCondition||'').trim()?' — '+String(d.specialCondition).trim():''),t:'s'};}
+  case 'deliveryLabel':{const label=String(d.pvz||'').trim()?'online':'magazin';return {v:label,t:'s'};}
   case 'city':return {v:addressHasOrhei(d.recipientAddress)?'Город':'',t:'s'};
   case 'blank':return {v:'',t:'s'};
   default:{const m=source.match(/^(model|category|qty|cost)([1-6])$/);if(m){if(m[1]==='category'){const cat=deliveryItemCategoryName(d,'model'+m[2]);return {v:String(cat||''),t:'s'};}const raw=d[source]??'';if(raw===''||raw==null)return {v:'',t:'s'};if(m[1]==='qty'||m[1]==='cost'){const n=Number(raw);return Number.isFinite(n)?{v:n,t:'n'}:{v:String(raw),t:'s'};}return {v:String(raw),t:'s'};}return {v:'',t:'s'};}
@@ -2724,7 +2724,7 @@ function newIndividualDelivery(){if(!prepareDeliveryCapacity())return;
  <div class="full"><div class="delivery-create-section"><h4>Товары / груз</h4>${Array.from({length:6},(_,i)=>deliveryCargoRowHtml(i+1)).join('')}<button id="addDeliveryCargoRowBtn" type="button" class="btn small" style="margin-top:10px" onclick="addDeliveryCargoRow()">＋ Добавить следующий ряд</button></div></div>
  <div class="full"><div class="delivery-create-section"><h4>Общая стоимость</h4><input id="deliveryCalculatedTotal" name="totalValue" type="text" value="0.00" readonly tabindex="-1"></div></div>
  <div class="full" id="individualDeliveryPvzField"><label>ПВЗ</label><input name="pvz" placeholder="Введите ПВЗ (необязательно)"></div>
- <div class="full"><label>Приписка для отчёта (необязательно)</label><textarea name="specialCondition" rows="3" placeholder="Например: срочная доставка"></textarea></div>
+ <div class="full"><label>Особое Условие</label><textarea name="specialCondition" rows="3" placeholder="Особое Условие"></textarea></div>
  <div class="full"><div class="delivery-create-section"><h4>Дата</h4><label style="display:flex;align-items:center;gap:8px;margin:0!important"><input id="useTodayDeliveryDate" name="useTodayDate" type="checkbox" checked onchange="toggleDeliveryDateMode()" style="width:auto"> Использовать сегодняшнюю дату</label><input id="deliveryDocumentDateInput" name="documentDate" type="text" value="${new Date().toLocaleDateString('ru-RU')}" placeholder="ДД.ММ.ГГГГ" disabled tabindex="-1" maxlength="20" oninput="sanitizeManualDeliveryDateInput(this)"></div></div>
  </div><div class="form-actions"><button type="button" class="btn" onclick="closeModal()">Отмена</button><button class="btn primary">Создать Индивидуальную Доставку</button></div></form>`;
  openModal();document.querySelectorAll('[name^="model"],[name^="qty"],[name^="cost"]').forEach(x=>x.addEventListener('input',recalcDeliveryTotal));toggleDeliveryDateMode();resetDeliveryCargoRows();
