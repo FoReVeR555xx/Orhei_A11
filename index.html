@@ -1314,8 +1314,10 @@ function cloudSafeState(){
   delete clean.deliveries;
   return clean;
 }
-let lastCloudServicesJson=null;
-let lastCloudOrdersJson=null;
+function readCloudSnapshot(key,fallback){try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):fallback}catch(_){return fallback}}
+let lastCloudServicesJson=localStorage.getItem('av_cloud_services_snapshot_v1')||null;
+let lastCloudOrdersJson=localStorage.getItem('av_cloud_orders_snapshot_v1')||null;
+let lastCloudStateSnapshot=readCloudSnapshot('av_cloud_state_snapshot_v1',{});
 function cloudTimestamp(value){
   let d;
   if(typeof value==='number' || /^\d+$/.test(String(value??''))) d=new Date(Number(value));
@@ -1328,9 +1330,13 @@ async function loadCloudState(){
   if(error) throw error;
   if(data?.payload && Object.keys(data.payload).length){
     const p=data.payload;
+    lastCloudStateSnapshot=JSON.parse(JSON.stringify(p));
+    localStorage.setItem('av_cloud_state_snapshot_v1',JSON.stringify(lastCloudStateSnapshot));
     ['deliveryArchive','sales','salesArchive','walletRows','walletLastUpdated','walletArchive','deliveryCategories','reportBindings','logs','groups','permissions','siteSettings','eventSettings','announcements','tabOrders'].forEach(k=>{if(p[k]!==undefined) state[k]=p[k]});
     return true;
   }
+  lastCloudStateSnapshot={};
+  localStorage.setItem('av_cloud_state_snapshot_v1','{}');
   return false;
 }
 async function loadCloudCollections(){
@@ -1351,6 +1357,8 @@ async function loadCloudCollections(){
   });
   lastCloudServicesJson=JSON.stringify(state.services);
   lastCloudOrdersJson=JSON.stringify(state.deliveries);
+  localStorage.setItem('av_cloud_services_snapshot_v1',lastCloudServicesJson);
+  localStorage.setItem('av_cloud_orders_snapshot_v1',lastCloudOrdersJson);
   cloudReady=true;
   return true;
 }
@@ -1374,44 +1382,38 @@ async function syncCloudProfiles(){
   });
 }
 async function persistNormalizedCollection(table,items,kind,previousJson){
-  const currentJson=JSON.stringify(items||[]);
+  const currentItems=Array.isArray(items)?items:[];
+  const currentJson=JSON.stringify(currentItems);
   if(currentJson===previousJson) return previousJson;
+  let previousItems=[];
+  try{previousItems=Array.isArray(JSON.parse(previousJson||'[]'))?JSON.parse(previousJson||'[]'):[]}catch(_){previousItems=[]}
+  const previousById=new Map(previousItems.map(item=>[String(item.id),item]));
+  const currentById=new Map(currentItems.map(item=>[String(item.id),item]));
   const now=new Date().toISOString();
-  const rows=(items||[]).map(item=>{
+  // Upsert only records actually changed on this client. Sending every record
+  // from a stale snapshot used to overwrite concurrent edits from other users.
+  const rows=currentItems.filter(item=>{
+    const old=previousById.get(String(item.id));
+    return !old || JSON.stringify(old)!==JSON.stringify(item);
+  }).map(item=>{
     const id=String(item.id);
     if(kind==='order'){
       const status=item.status==='Доставлен'?'Доставлен':'Ожидает';
-      return {
-        id,
-        order_number:String(item.number||item.requestNo||item.order_number||id),
-        status,
-        created_by:item.createdBy?String(item.createdBy):null,
-        created_at:cloudTimestamp(item.createdAt||item.created_at),
-        updated_at:now,
-        payload:{...item,id:item.id,status}
-      };
+      return {id,order_number:String(item.number||item.requestNo||item.order_number||id),status,created_by:item.createdBy?String(item.createdBy):null,created_at:cloudTimestamp(item.createdAt||item.created_at),updated_at:now,payload:{...item,id:item.id,status}};
     }
-    return {
-      id,
-      service_number:String(item.number||item.service_number||id),
-      created_by:item.createdBy?String(item.createdBy):null,
-      created_at:cloudTimestamp(item.createdAt||item.created_at),
-      updated_at:now,
-      payload:item
-    };
+    return {id,service_number:String(item.number||item.service_number||id),created_by:item.createdBy?String(item.createdBy):null,created_at:cloudTimestamp(item.createdAt||item.created_at),updated_at:now,payload:item};
   });
   if(rows.length){
     const {error}=await supabaseClient.from(table).upsert(rows,{onConflict:'id'});
     if(error) throw error;
   }
-  const {data:existing,error:selectError}=await supabaseClient.from(table).select('id');
-  if(selectError) throw selectError;
-  const keep=new Set(rows.map(row=>String(row.id)));
-  for(const row of (existing||[])){
-    if(!keep.has(String(row.id))){
-      const {error}=await supabaseClient.from(table).delete().eq('id',row.id);
-      if(error) throw error;
-    }
+  // Delete only IDs that existed in this client's last cloud snapshot and were
+  // explicitly removed locally. Never delete records added by another client
+  // after this client last loaded data.
+  const removedIds=[...previousById.keys()].filter(id=>!currentById.has(id));
+  for(const id of removedIds){
+    const {error}=await supabaseClient.from(table).delete().eq('id',id);
+    if(error) throw error;
   }
   return currentJson;
 }
@@ -1421,10 +1423,15 @@ async function pushCloudStateNow(){
   if(!user) return false;
   const servicesJson=await persistNormalizedCollection('services',state.services||[],'service',lastCloudServicesJson);
   const ordersJson=await persistNormalizedCollection('orders',state.deliveries||[],'order',lastCloudOrdersJson);
-  const {error}=await supabaseClient.from('app_state').upsert({id:CLOUD_STATE_ID,payload:cloudSafeState(),updated_at:new Date().toISOString(),updated_by:user.id});
-  if(error){ console.error('Supabase save failed',error); throw error; }
+  const incomingState=cloudSafeState();
+  const {data:mergedState,error}=await supabaseClient.rpc('merge_app_state',{p_base:lastCloudStateSnapshot||{},p_incoming:incomingState});
+  if(error){ console.error('Supabase merge save failed',error); throw error; }
+  lastCloudStateSnapshot=mergedState&&typeof mergedState==='object'?JSON.parse(JSON.stringify(mergedState)):incomingState;
   lastCloudServicesJson=servicesJson;
   lastCloudOrdersJson=ordersJson;
+  localStorage.setItem('av_cloud_state_snapshot_v1',JSON.stringify(lastCloudStateSnapshot));
+  localStorage.setItem('av_cloud_services_snapshot_v1',lastCloudServicesJson);
+  localStorage.setItem('av_cloud_orders_snapshot_v1',lastCloudOrdersJson);
   return true;
 }
 const PENDING_SYNC_KEY='av_pending_sync_v1';
