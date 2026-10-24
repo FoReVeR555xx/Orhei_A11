@@ -1353,6 +1353,7 @@ async function loadCloudCollections(){
   lastCloudOrdersJson=JSON.stringify(state.deliveries);
   cloudReady=true;
   lastSyncedContentFingerprint=currentSyncContentFingerprint();
+  try{if(!readPendingSync().length)localStorage.setItem('av_sync_baseline_v1',JSON.stringify(buildSyncSnapshot()))}catch(_){}
   try{await getServerSyncRevision()}catch(revisionError){console.warn('Не удалось прочитать версию синхронизации:',revisionError)}
   return true;
 }
@@ -1446,31 +1447,101 @@ function queuePendingSync(reason='Изменения приложения',snaps
 function migrateLegacySyncQueue(){try{if(localStorage.getItem(PENDING_SYNC_KEY)!==null)return;const old=JSON.parse(localStorage.getItem('av_pending_sync_v1')||'[]');if(!Array.isArray(old)||!old.length)return;const recent=old.filter(x=>x&&typeof x==='object');if(!recent.length)return;const last=recent[recent.length-1];const migrated={id:newSyncId(),createdAt:Number(last.createdAt)||Date.now(),user:last.user||state.user?.name||state.user?.login||'Сотрудник',action:last.action||'Изменение данных',summary:`Восстановлено из старой очереди (${recent.length} записей): ${last.summary||last.reason||'локальные изменения'}`,status:'Ожидает отправления',reason:'Очередь перенесена из предыдущей версии; перед отправкой проверяется версия сервера',attempts:0,expectedRevision:syncRevision??Number(localStorage.getItem('av_sync_revision_v1')||0),snapshot:buildSyncSnapshot()};writePendingSync([migrated]);const oldHistory=JSON.parse(localStorage.getItem('av_sync_history_v1')||'[]');if(Array.isArray(oldHistory))writeSyncHistory(oldHistory);localStorage.setItem('av_pending_sync_v1_migrated','1')}catch(e){console.warn('Не удалось перенести старую очередь синхронизации',e)}}
 function renderPendingSyncBadge(){const items=readPendingSync();const label=document.getElementById('realtimeSyncLabel');if(!label)return;const conflicts=items.filter(x=>x.status==='conflict').length;if(conflicts){label.textContent=`Конфликт синхронизации: ${conflicts}`;setRealtimeIndicator('error','Требуется разрешить конфликт');return}if(items.length){label.textContent=`Ожидают отправки: ${items.length}`;return}if(!navigator.onLine)setRealtimeIndicator('offline','Нет связи');else if(supabaseClient&&cloudReady)setRealtimeIndicator('live','В реальном времени')}
 async function getServerSyncRevision(){if(!supabaseClient)return null;const {data,error}=await supabaseClient.rpc('get_sync_revision');if(error)throw error;syncRevision=Number(data||0);localStorage.setItem('av_sync_revision_v1',String(syncRevision));return syncRevision}
-async function submitPendingSyncItem(item){
+function syncJsonEqual(a,b){return JSON.stringify(a)===JSON.stringify(b)}
+function syncMergeValues(base,local,remote){
+ if(syncJsonEqual(local,base))return remote;
+ if(syncJsonEqual(remote,base))return local;
+ if(local===undefined)return remote;
+ if(remote===undefined)return local;
+ if(Array.isArray(local)&&Array.isArray(remote)){
+   const keyed=local.concat(remote).every(x=>x&&typeof x==='object'&&!Array.isArray(x)&&('id'in x));
+   if(keyed){
+     const bm=new Map((Array.isArray(base)?base:[]).map(x=>[String(x.id),x]));
+     const lm=new Map(local.map(x=>[String(x.id),x]));
+     const rm=new Map(remote.map(x=>[String(x.id),x]));
+     const ids=[...new Set([...remote.map(x=>String(x.id)),...local.map(x=>String(x.id))])];
+     return ids.map(id=>syncMergeValues(bm.get(id),lm.get(id),rm.get(id))).filter(x=>x!==undefined);
+   }
+   // For append-style logs/archives, keep unique entries from both devices.
+   const out=[],seen=new Set();
+   for(const x of [...remote,...local]){const k=JSON.stringify(x);if(!seen.has(k)){seen.add(k);out.push(x)}}
+   return out;
+ }
+ if(local&&remote&&typeof local==='object'&&typeof remote==='object'&&!Array.isArray(local)&&!Array.isArray(remote)){
+   const b=base&&typeof base==='object'&&!Array.isArray(base)?base:{};const out={};
+   for(const k of new Set([...Object.keys(b),...Object.keys(local),...Object.keys(remote)])){
+     const v=syncMergeValues(b[k],local[k],remote[k]);if(v!==undefined)out[k]=v;
+   }
+   return out;
+ }
+ // If the same scalar was independently changed, prefer the server copy.
+ return remote;
+}
+async function fetchServerSyncSnapshot(){
+ const [stateResult,serviceResult,orderResult]=await Promise.all([
+  supabaseClient.from('app_state').select('payload').eq('id',CLOUD_STATE_ID).maybeSingle(),
+  supabaseClient.from('services').select('id,service_number,created_by,created_at,updated_at,payload').order('created_at',{ascending:false}),
+  supabaseClient.from('orders').select('id,order_number,status,created_by,created_at,updated_at,payload').order('created_at',{ascending:false})
+ ]);
+ if(stateResult.error)throw stateResult.error;if(serviceResult.error)throw serviceResult.error;if(orderResult.error)throw orderResult.error;
+ return {app_state:stateResult.data?.payload&&typeof stateResult.data.payload==='object'?stateResult.data.payload:{},
+  services:(serviceResult.data||[]).map(row=>({id:String(row.id),service_number:String(row.service_number||row.id),created_by:row.created_by||null,created_at:cloudTimestamp(row.created_at),updated_at:row.updated_at||null,payload:row.payload&&typeof row.payload==='object'?row.payload:{id:row.id}})),
+  orders:(orderResult.data||[]).map(row=>({id:String(row.id),order_number:String(row.order_number||row.id),status:row.status||'Ожидает',created_by:row.created_by||null,created_at:cloudTimestamp(row.created_at),updated_at:row.updated_at||null,payload:row.payload&&typeof row.payload==='object'?row.payload:{id:row.id,status:row.status||'Ожидает'}}))};
+}
+function applyMergedSyncSnapshot(snapshot){
+ if(!snapshot)return;
+ const safe=snapshot.app_state||{};
+ for(const [k,v] of Object.entries(safe)){if(!['user','users','services','deliveries'].includes(k))state[k]=v}
+ state.services=(snapshot.services||[]).map(x=>({...((x&&x.payload&&typeof x.payload==='object')?x.payload:{}),id:x.id}));
+ state.deliveries=(snapshot.orders||[]).map(x=>({...((x&&x.payload&&typeof x.payload==='object')?x.payload:{}),id:x.id,status:x.status||x.payload?.status||'Ожидает'}));
+}
+async function rebasePendingSyncItem(item){
+ if(!supabaseClient||!navigator.onLine)throw new Error('Нет подключения для объединения конфликта');
+ const oldId=item.id;const remote=await fetchServerSyncSnapshot();
+ let base=null;try{base=JSON.parse(localStorage.getItem('av_sync_baseline_v1')||'null')}catch(_){}
+ const merged=syncMergeValues(base||{},item.snapshot||{},remote);
+ const {data:revData,error:revError}=await supabaseClient.rpc('get_sync_revision');if(revError)throw revError;
+ const currentRevision=Number(revData||0);
+ // A conflict is a completed server-side operation ID; retry with a fresh ID.
+ writeSyncHistory([{...item,status:'Конфликт объединён',reason:`Локальные изменения объединены с сервером (ревизия ${currentRevision})`,createdAt:item.createdAt,resolvedAt:Date.now()},...readSyncHistory()]);
+ item.id=newSyncId();item.snapshot=merged;item.expectedRevision=currentRevision;item.status='Ожидает отправления';item.reason='Объединено с актуальными данными; повторная отправка';item.attempts=0;item.inFlight=false;item.serverRevision=currentRevision;
+ const items=readPendingSync();const idx=items.findIndex(x=>x.id===oldId);if(idx>=0)items[idx]=item;else items.unshift(item);writePendingSync(items);
+ syncRevision=currentRevision;localStorage.setItem('av_sync_revision_v1',String(currentRevision));
+ applyMergedSyncSnapshot(merged);
+ try{localStorage.setItem('av_sync_baseline_v1',JSON.stringify(remote))}catch(_){}
+ renderPendingSyncBadge();
+}
+async function submitPendingSyncItem(item,allowRebase=true){
  if(!supabaseClient||!navigator.onLine)throw new Error('Нет подключения к серверу');
+ if(item.status==='conflict'&&allowRebase)await rebasePendingSyncItem(item);
+ const attemptedId=item.id;
  const {data,error}=await supabaseClient.rpc('submit_sync_snapshot',{p_operation_id:item.id,p_expected_revision:Number(item.expectedRevision??0),p_snapshot:item.snapshot,p_action:String(item.action||'Изменение данных').slice(0,160),p_summary:String(item.summary||'').slice(0,1200)});
  if(error)throw error;
  const result=Array.isArray(data)?data[0]:data;
  if(!result||!result.status)throw new Error('Сервер не вернул подтверждение операции');
  if(result.status==='conflict'){
-   item.status='conflict';item.reason=`Конфликт версий: локальная версия ${item.expectedRevision}, серверная версия ${result.current_revision}`;item.serverRevision=Number(result.current_revision);item.lastAttemptAt=Date.now();
-   const all=readPendingSync().map(x=>x.id===item.id?item:x);writePendingSync(all);writeSyncHistory([{...item,createdAt:item.createdAt,status:'Конфликт',reason:item.reason},...readSyncHistory()]);renderPendingSyncBadge();return false;
+   item.status='conflict';item.reason=`Конфликт версий: локальная версия ${item.expectedRevision}, серверная версия ${result.current_revision}`;item.serverRevision=Number(result.current_revision);item.lastAttemptAt=Date.now();item.inFlight=false;
+   const all=readPendingSync().map(x=>x.id===item.id?item:x);writePendingSync(all);writeSyncHistory([{...item,createdAt:item.createdAt,status:'Конфликт',reason:item.reason},...readSyncHistory()]);renderPendingSyncBadge();
+   if(allowRebase){await rebasePendingSyncItem(item);return await submitPendingSyncItem(item,false)}
+   return false;
  }
  if(result.status!=='committed'&&result.status!=='already_committed')throw new Error(result.message||'Операция не подтверждена сервером');
  syncRevision=Number(result.revision??result.current_revision??syncRevision??0);localStorage.setItem('av_sync_revision_v1',String(syncRevision));lastSyncedContentFingerprint=snapshotContentFingerprint(item.snapshot);
- const current=readPendingSync();const remaining=current.filter(x=>x.id!==item.id);
- // Later snapshots from this same browser follow the acknowledged snapshot in sequence.
+ const current=readPendingSync();const remaining=current.filter(x=>x.id!==item.id&&x.id!==attemptedId);
  remaining.forEach(x=>{if(x.status==='Ожидает отправления'&&Number(x.attempts||0)===0)x.expectedRevision=syncRevision});
  writePendingSync(remaining);writeSyncHistory([{...item,status:'Отправлено',reason:'',sentAt:Date.now(),serverRevision:syncRevision},...readSyncHistory()]);
+ try{localStorage.setItem('av_sync_baseline_v1',JSON.stringify(item.snapshot))}catch(_){}
+ // Keep the visible local state aligned with the merged, acknowledged snapshot.
+ applyMergedSyncSnapshot(item.snapshot);
+ lastCloudServicesJson=JSON.stringify(state.services);lastCloudOrdersJson=JSON.stringify(state.deliveries);
  return true;
 }
 async function flushPendingSync(){
  if(pendingSyncInProgress||!state.user||!supabaseClient||!cloudReady||!navigator.onLine)return false;
  let items=readPendingSync();if(!items.length){renderPendingSyncBadge();return true}
- if(items.some(x=>x.status==='conflict')){renderPendingSyncBadge();return false}
  pendingSyncInProgress=true;setRealtimeIndicator('syncing','Отправка очереди…');
  try{
-   for(;;){items=readPendingSync();if(!items.length)break;const item=items[0];if(item.status==='conflict')return false;
+   for(;;){items=readPendingSync();if(!items.length)break;const item=items[0];
      item.attempts=Number(item.attempts||0)+1;item.lastAttemptAt=Date.now();item.inFlight=true;writePendingSync(items);
      try{const ok=await submitPendingSyncItem(item);if(!ok)return false;}
      catch(e){const message=String(e?.message||e||'Неизвестная ошибка');const latest=readPendingSync().map(x=>x.id===item.id?({...x,inFlight:false,reason:message,status:'Ожидает отправления'}):x);writePendingSync(latest);console.warn('Sync operation remains queued:',e);setRealtimeIndicator('error','Ожидает отправления');renderPendingSyncBadge();return false}
@@ -1478,7 +1549,7 @@ async function flushPendingSync(){
    setRealtimeIndicator('live','В реальном времени');renderPendingSyncBadge();return true;
  }finally{pendingSyncInProgress=false;if(document.getElementById('modalBox')?.innerHTML.includes('Синхронизация изменений'))showSyncDetails()}
 }
-async function pushCloudStateNow(){if(!supabaseClient||!cloudReady||!state.user)return false;if(!navigator.onLine){queuePendingSync('Нет подключения к интернету');return false}if(readPendingSync().some(x=>x.status==='conflict')){renderPendingSyncBadge();return false}if(!readPendingSync().length&&lastSyncedContentFingerprint===currentSyncContentFingerprint()){renderPendingSyncBadge();return true}queuePendingSync('Сохранение данных');return await flushPendingSync()}
+async function pushCloudStateNow(){if(!supabaseClient||!cloudReady||!state.user)return false;if(!navigator.onLine){queuePendingSync('Нет подключения к интернету');return false}if(!readPendingSync().length&&lastSyncedContentFingerprint===currentSyncContentFingerprint()){renderPendingSyncBadge();return true}queuePendingSync('Сохранение данных');return await flushPendingSync()}
 function pushCloudState(){if(!state.user)return;if(!navigator.onLine||!supabaseClient||!cloudReady){queuePendingSync(!navigator.onLine?'Нет подключения к интернету':'Соединение с сервером недоступно');return}clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(async()=>{try{await pushCloudStateNow()}catch(e){console.error('Supabase save failed',e);queuePendingSync(e?.message||'Не удалось отправить изменения в базу');setRealtimeIndicator('error','Ожидает отправления')}},350)}
 window.addEventListener('online',()=>{setRealtimeIndicator('syncing','Восстановление связи…');setTimeout(()=>flushPendingSync(),300)});window.addEventListener('offline',()=>{setRealtimeIndicator('offline','Нет связи');renderPendingSyncBadge()});
 async function showSyncDetails(){const pending=readPendingSync(),localHistory=readSyncHistory();let serverHistory=[];if(supabaseClient&&navigator.onLine&&state.user){try{const since=new Date(Date.now()-32*60*60*1000).toISOString();const {data,error}=await supabaseClient.from('sync_operations').select('id,user_id,action,summary,status,expected_revision,resulting_revision,error_message,created_at,processed_at').gte('created_at',since).order('created_at',{ascending:false}).limit(300);if(error)throw error;const {data:profiles}=await supabaseClient.from('profiles').select('id,login,display_name');const profileMap=new Map((profiles||[]).map(p=>[p.id,p]));serverHistory=(data||[]).map(x=>{const profile=profileMap.get(x.user_id);return{id:x.id,createdAt:new Date(x.created_at).getTime(),user:profile?.display_name||profile?.login||(x.user_id===state.user?.id?state.user?.name:'Сотрудник'),action:x.action,summary:x.summary,status:x.status==='committed'?'Отправлено':x.status==='conflict'?'Конфликт':'В обработке',reason:x.error_message||'',attempts:'',serverRevision:x.resulting_revision}})}catch(e){console.warn('Не удалось загрузить серверную историю синхронизации',e)}}const all=[...pending.map(x=>({...x,source:'local'})),...localHistory.map(x=>({...x,source:'local'})),...serverHistory].sort((a,b)=>Number(b.createdAt)-Number(a.createdAt));openModal();document.getElementById('modalBox').innerHTML=`<div class="modal-head"><h2>Синхронизация изменений</h2><button class="btn" onclick="closeModal()">Закрыть</button></div><p class="muted">Очередь хранится локально, а подтверждённые операции и конфликты — на сервере. История отображается за последние 32 часа.</p><div class="table-wrap"><table><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Информация</th><th>Статус</th><th>Причина / попытки</th></tr></thead><tbody>${all.map(x=>`<tr><td>${esc(new Date(x.createdAt).toLocaleString('ru-RU'))}</td><td>${esc(x.user||'—')}</td><td>${esc(x.action||'Изменение')}</td><td>${esc(x.summary||'')}</td><td>${esc(x.status||'Ожидает отправления')}</td><td>${esc([x.reason,x.attempts?`Попыток: ${x.attempts}`:''].filter(Boolean).join(' · ')||'—')}</td></tr>`).join('')||'<tr><td colspan="6">Нет записей за последние 32 часа</td></tr>'}</tbody></table></div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" onclick="flushPendingSync()">Повторить отправку</button><button class="btn" onclick="exportSyncConflict()">Экспортировать локальную очередь</button></div>`}
