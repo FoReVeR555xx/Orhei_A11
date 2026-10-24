@@ -1415,17 +1415,42 @@ async function persistNormalizedCollection(table,items,kind,previousJson){
   }
   return currentJson;
 }
-async function pushCloudStateNow(){
-  if(!supabaseClient || !cloudReady) return false;
-  const {data:{user}}=await supabaseClient.auth.getUser();
-  if(!user) return false;
+const SUPABASE_RETRY_DELAY_MS = 4000;
+const SUPABASE_MAX_ATTEMPTS = 3;
+let supabaseRetryNoticeShown = false;
+function waitForSupabaseRetry(){return new Promise(resolve=>setTimeout(resolve,SUPABASE_RETRY_DELAY_MS));}
+function supabaseConnectionError(){return new Error('Не удалось выполнить действие из-за проблем с подключением к Supabase. Попробуйте снова.');}
+async function pushCloudStateAttempt(){
+  if(!navigator.onLine) throw new Error('Нет подключения к интернету');
+  if(!supabaseClient) throw new Error('Клиент Supabase не настроен');
+  if(!cloudReady) throw new Error('Подключение к Supabase ещё не готово');
+  const {data:{user},error:userError}=await supabaseClient.auth.getUser();
+  if(userError) throw userError;
+  if(!user) throw new Error('Сессия пользователя Supabase не найдена');
   const servicesJson=await persistNormalizedCollection('services',state.services||[],'service',lastCloudServicesJson);
   const ordersJson=await persistNormalizedCollection('orders',state.deliveries||[],'order',lastCloudOrdersJson);
   const {error}=await supabaseClient.from('app_state').upsert({id:CLOUD_STATE_ID,payload:cloudSafeState(),updated_at:new Date().toISOString(),updated_by:user.id});
-  if(error){ console.error('Supabase save failed',error); throw error; }
+  if(error) throw error;
   lastCloudServicesJson=servicesJson;
   lastCloudOrdersJson=ordersJson;
   return true;
+}
+async function pushCloudStateNow(){
+  let lastError=null;
+  for(let attempt=1;attempt<=SUPABASE_MAX_ATTEMPTS;attempt++){
+    try{
+      const saved=await pushCloudStateAttempt();
+      if(!saved) throw new Error('Supabase не подтвердил сохранение');
+      supabaseRetryNoticeShown=false;
+      return true;
+    }catch(error){
+      lastError=error;
+      console.warn(`Supabase save attempt ${attempt}/${SUPABASE_MAX_ATTEMPTS} failed:`,error);
+      if(attempt<SUPABASE_MAX_ATTEMPTS) await waitForSupabaseRetry();
+    }
+  }
+  setRealtimeIndicator('error','Ошибка синхронизации');
+  throw supabaseConnectionError();
 }
 const PENDING_SYNC_KEY='av_pending_sync_v1';
 const SYNC_HISTORY_KEY='av_sync_history_v1';
@@ -1438,7 +1463,7 @@ function writeSyncHistory(items){localStorage.setItem(SYNC_HISTORY_KEY,JSON.stri
 function queuePendingSync(reason='Изменения приложения'){if(!state.user)return;const items=readPendingSync();const last=(state.logs||[])[0]||{};const now=Date.now();const item={id:'sync-'+now+'-'+Math.random().toString(36).slice(2,7),createdAt:now,user:state.user.name||state.user.login,action:last.action||'Изменение данных',summary:[last.object,last.details].filter(Boolean).join(' — ')||reason,status:'Ожидает отправления',reason:!navigator.onLine?'Нет подключения к интернету':String(reason||'Сервер временно недоступен'),attempts:0};items.unshift(item);writePendingSync(items);renderPendingSyncBadge()}
 function renderPendingSyncBadge(){const items=readPendingSync();const label=document.getElementById('realtimeSyncLabel');if(!label)return;if(items.length){label.textContent=`Ожидают отправки: ${items.length}`;return}if(!navigator.onLine)setRealtimeIndicator('offline','Нет связи');else if(supabaseClient&&cloudReady)setRealtimeIndicator('live','В реальном времени')}
 async function flushPendingSync(){if(pendingSyncInProgress||!state.user||!supabaseClient||!cloudReady||!navigator.onLine)return;const items=readPendingSync();if(!items.length){renderPendingSyncBadge();return}pendingSyncInProgress=true;const startedAt=Date.now();try{const synced=await pushCloudStateNow();if(!synced)throw new Error('Синхронизация пока недоступна');const sentIds=new Set(items.map(x=>x.id));writePendingSync(readPendingSync().filter(x=>!sentIds.has(x.id)));const sent=items.map(x=>({...x,status:'Отправлено',reason:'',sentAt:Date.now()}));writeSyncHistory([...sent,...readSyncHistory()]);state.logs.unshift({id:Date.now(),user:state.user?.name||state.user?.login||'Система',action:'Актуализация локальных данных',object:`Отправлено изменений: ${sent.length}`,service:'',details:sent.map(x=>x.summary||x.action).filter(Boolean).join('; ').slice(0,1800),date:new Date().toLocaleString('ru-RU')});localStorage.setItem('av_logs',JSON.stringify(state.logs));try{await pushCloudStateNow()}catch(logError){console.warn('Данные синхронизированы, но запись журнала пока не отправлена:',logError)}setRealtimeIndicator('live','В реальном времени');renderPendingSyncBadge()}catch(e){const message=String(e?.message||e||'Неизвестная ошибка');const current=readPendingSync().map(x=>({...x,attempts:Number(x.attempts||0)+1,lastAttemptAt:Date.now(),status:'Ожидает отправления',reason:message}));writePendingSync(current);console.warn('Pending sync still waiting:',e);setRealtimeIndicator('error','Ошибка синхронизации');renderPendingSyncBadge()}finally{pendingSyncInProgress=false;if(Date.now()-startedAt>0&&document.getElementById('modalBox')?.innerHTML.includes('Синхронизация изменений'))showSyncDetails()}}
-function pushCloudState(){if(!navigator.onLine||!supabaseClient||!cloudReady){queuePendingSync(!navigator.onLine?'Нет подключения к интернету':'Соединение с сервером недоступно');return}clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(async()=>{try{await pushCloudStateNow();if(readPendingSync().length)await flushPendingSync()}catch(e){console.error('Supabase save failed',e);queuePendingSync(e?.message||'Не удалось отправить изменения в базу');setRealtimeIndicator('error','Ожидает отправления')}},250)}
+function pushCloudState(){clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(async()=>{try{await pushCloudStateNow();if(readPendingSync().length)await flushPendingSync()}catch(e){console.error('Supabase save failed after retries',e);setRealtimeIndicator('error','Ошибка синхронизации');if(!supabaseRetryNoticeShown){supabaseRetryNoticeShown=true;alert('Не удалось выполнить действие из-за проблем с подключением к Supabase. Попробуйте снова.')}}},250)}
 window.addEventListener('online',()=>{setRealtimeIndicator('syncing','Восстановление связи…');setTimeout(()=>flushPendingSync(),300)});window.addEventListener('offline',()=>{setRealtimeIndicator('offline','Нет связи');renderPendingSyncBadge()});
 function showSyncDetails(){const pending=readPendingSync(),history=readSyncHistory();const all=[...pending,...history].sort((a,b)=>Number(b.createdAt)-Number(a.createdAt));openModal();document.getElementById('modalBox').innerHTML=`<div class="modal-head"><h2>Синхронизация изменений</h2><button class="btn" onclick="closeModal()">Закрыть</button></div><p class="muted">История и ожидающие изменения хранятся локально в этом браузере до 32 часов. При восстановлении соединения приложение повторит отправку.</p><div class="table-wrap"><table><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Информация</th><th>Статус</th><th>Причина / попытки</th></tr></thead><tbody>${all.map(x=>`<tr><td>${esc(new Date(x.createdAt).toLocaleString('ru-RU'))}</td><td>${esc(x.user||'—')}</td><td>${esc(x.action||'Изменение')}</td><td>${esc(x.summary||'')}</td><td>${esc(x.status||'Ожидает отправления')}</td><td>${esc([x.reason,x.attempts?`Попыток: ${x.attempts}`:''].filter(Boolean).join(' · ')||'—')}</td></tr>`).join('')||'<tr><td colspan="6">Нет ожидающих изменений</td></tr>'}</tbody></table></div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" onclick="flushPendingSync()">Повторить отправку</button></div>`}
 
