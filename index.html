@@ -1231,6 +1231,28 @@ body.app-active { overflow:hidden !important; }
 <script>
 let pdfjsLib = null;
 import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs").then(m=>{pdfjsLib=m; if(m.GlobalWorkerOptions) m.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs";}).catch(()=>{});
+// Освобождаем место до инициализации состояния и авторизации.
+// av_logs — необязательный локальный журнал; его переполнение не должно блокировать вход.
+(function repairLocalLogStorage(){
+ try {
+  const raw = localStorage.getItem('av_logs');
+  if (!raw) return;
+  let logs = JSON.parse(raw);
+  if (!Array.isArray(logs)) logs = [];
+  const compact = JSON.stringify(logs.slice(0, 300));
+  try {
+   localStorage.setItem('av_logs', compact);
+  } catch (quotaError) {
+   // Если в хранилище всё ещё нет места, удаляем только локальную копию журнала.
+   // Данные приложения и очередь синхронизации не затрагиваются.
+   localStorage.removeItem('av_logs');
+  }
+ } catch (error) {
+  // Повреждённый журнал также не должен блокировать запуск приложения.
+  try { localStorage.removeItem('av_logs'); } catch (_) {}
+ }
+})();
+
 const state = {
  user:null,
  announcements: JSON.parse(localStorage.getItem('av_announcements')||'[]'),
