@@ -1503,53 +1503,93 @@ async function pushCloudStateRaw(snapshot=state){
   setRealtimeIndicator('error','Ошибка синхронизации');
   throw supabaseConnectionError();
 }
-// All cloud writes pass through one FIFO queue. Realtime must be subscribed before
-// a queued snapshot is sent; otherwise the item waits and checks again in 2 seconds.
-const CLOUD_WRITE_QUEUE_KEY='av_cloud_write_queue_v1';
-let cloudWriteQueue=Promise.resolve();
+// Durable FIFO queue: every entry contains its own immutable state snapshot.
+const CLOUD_WRITE_QUEUE_KEY='av_cloud_write_queue_v2';
+const CLOUD_WRITE_QUEUE_LEGACY_KEY='av_cloud_write_queue_v1';
+const CLOUD_WRITE_DB='av_cloud_write_queue_db_v2';
+const CLOUD_WRITE_STORE='writes';
+let cloudWritePump=null;
+let cloudQueueRetryTimer=null;
 let cloudWriteSequence=0;
-function readCloudWriteQueue(){try{return JSON.parse(localStorage.getItem(CLOUD_WRITE_QUEUE_KEY)||'[]').filter(x=>Date.now()-Number(x.createdAt||0)<7*24*60*60*1000)}catch(_){return []}}
-function writeCloudWriteQueue(items){safeLocalStorageSetItem(CLOUD_WRITE_QUEUE_KEY,JSON.stringify(items.slice(-500)))}
+let realtimeSubscribed=false;
+let cloudQueueDbPromise=null;
+function openCloudQueueDb(){
+ if(!('indexedDB' in window))return Promise.resolve(null);
+ if(cloudQueueDbPromise)return cloudQueueDbPromise;
+ cloudQueueDbPromise=new Promise(resolve=>{
+  try{const req=indexedDB.open(CLOUD_WRITE_DB,1);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(CLOUD_WRITE_STORE))db.createObjectStore(CLOUD_WRITE_STORE,{keyPath:'id'})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>resolve(null);req.onblocked=()=>resolve(null)}catch(_){resolve(null)}
+ });return cloudQueueDbPromise;
+}
+async function cloudQueueDbAll(){const db=await openCloudQueueDb();if(!db)return null;return new Promise(resolve=>{try{const tx=db.transaction(CLOUD_WRITE_STORE,'readonly'),req=tx.objectStore(CLOUD_WRITE_STORE).getAll();req.onsuccess=()=>resolve((req.result||[]).sort((a,b)=>a.createdAt-b.createdAt));req.onerror=()=>resolve(null)}catch(_){resolve(null)}})}
+async function cloudQueueDbPut(item){const db=await openCloudQueueDb();if(!db)return false;return new Promise(resolve=>{try{const tx=db.transaction(CLOUD_WRITE_STORE,'readwrite');tx.objectStore(CLOUD_WRITE_STORE).put(item);tx.oncomplete=()=>resolve(true);tx.onerror=tx.onabort=()=>resolve(false)}catch(_){resolve(false)}})}
+async function cloudQueueDbDelete(id){const db=await openCloudQueueDb();if(!db)return;await new Promise(resolve=>{try{const tx=db.transaction(CLOUD_WRITE_STORE,'readwrite');tx.objectStore(CLOUD_WRITE_STORE).delete(id);tx.oncomplete=tx.onerror=tx.onabort=()=>resolve()}catch(_){resolve()}})}
+function readCloudWriteQueue(){try{return JSON.parse(localStorage.getItem(CLOUD_WRITE_QUEUE_KEY)||'[]')}catch(_){return []}}
+function writeCloudWriteQueue(items){safeLocalStorageSetItem(CLOUD_WRITE_QUEUE_KEY,JSON.stringify(items.slice(-100)))}
 function updateCloudActivity(entryId,patch){const item=(state.logs||[]).find(x=>String(x.id)===String(entryId));if(item){Object.assign(item,patch);safeLocalStorageSetItem('av_logs',JSON.stringify((state.logs||[]).slice(0,STORAGE_LOG_LIMIT)));}}
 function addCloudQueueActivity(){
-  const last=(state.logs||[])[0]||{};const now=Date.now();
-  const recent=last.date&&!last.queueId&&Number.isFinite(parseLogDate(last.date))&&now-parseLogDate(last.date)<5000;
-  const entry=recent?last:{id:'cloud-'+now+'-'+(++cloudWriteSequence),user:state.user?.name||state.user?.login||'Система',action:'Изменение данных',object:'Сохранение данных приложения',service:'',details:'Изменение поставлено в очередь отправки',date:new Date(now).toLocaleString('ru-RU')};
-  if(!recent){state.logs.unshift(entry);if(state.logs.length>STORAGE_LOG_LIMIT)state.logs.length=STORAGE_LOG_LIMIT;}
-  entry.syncStatus='В очереди';entry.queueId='q-'+now+'-'+cloudWriteSequence;
-  safeLocalStorageSetItem('av_logs',JSON.stringify(state.logs.slice(0,STORAGE_LOG_LIMIT)));
-  const q=readCloudWriteQueue();q.push({id:entry.queueId,createdAt:now,activityId:entry.id,status:'В очереди'});writeCloudWriteQueue(q);
-  return entry;
+ const now=Date.now(),last=(state.logs||[])[0]||{};
+ const entry={id:'cloud-'+now+'-'+(++cloudWriteSequence),user:state.user?.name||state.user?.login||'Система',action:last.action||'Изменение данных',object:last.object||'Сохранение данных приложения',service:last.service||'',details:last.details||'Изменение поставлено в очередь отправки',date:new Date(now).toLocaleString('ru-RU'),syncStatus:'Сохранение в очереди'};
+ state.logs.unshift(entry);if(state.logs.length>STORAGE_LOG_LIMIT)state.logs.length=STORAGE_LOG_LIMIT;
+ safeLocalStorageSetItem('av_logs',JSON.stringify(state.logs.slice(0,STORAGE_LOG_LIMIT)));
+ return entry;
 }
 async function waitForRealtimeForQueue(){
-  while(state.user&&supabaseClient&&cloudReady){
-    const status=document.getElementById('realtimeSyncIndicator')?.dataset.state;
-    if(navigator.onLine&&status==='live')return true;
-    await new Promise(resolve=>setTimeout(resolve,2000));
-  }
-  return false;
+ while(state.user&&supabaseClient&&cloudReady){
+  if(navigator.onLine&&realtimeSubscribed)return true;
+  await new Promise(resolve=>setTimeout(resolve,2000));
+ }
+ return false;
 }
-function pushCloudStateNow(){
-  if(!state.user)return Promise.resolve(false);
-  const activity=addCloudQueueActivity();
-  let snapshot;try{snapshot=JSON.parse(JSON.stringify(state))}catch(_){snapshot=state}
-  const task=async()=>{
-    try{
-      const ready=await waitForRealtimeForQueue();
-      if(!ready)throw new Error('Сессия завершена или подключение недоступно');
-      updateCloudActivity(activity.id,{syncStatus:'Отправляется'});
-      const result=await pushCloudStateRaw(snapshot);
-      updateCloudActivity(activity.id,{syncStatus:'Отправлено',syncSentAt:new Date().toLocaleString('ru-RU')});
-      const q=readCloudWriteQueue().filter(x=>x.id!==activity.queueId);writeCloudWriteQueue(q);
-      return result;
-    }catch(error){
-      updateCloudActivity(activity.id,{syncStatus:'Ожидает повторной отправки',syncError:String(error?.message||error)});
-      throw error;
-    }
-  };
-  const result=cloudWriteQueue.then(task,task);
-  cloudWriteQueue=result.catch(()=>{});
-  return result;
+async function persistCloudQueueItem(item){
+ if(await cloudQueueDbPut(item))return true;
+ // Fallback for browsers where IndexedDB is unavailable. Snapshots are retained, not just IDs.
+ const q=readCloudWriteQueue();q.push(item);writeCloudWriteQueue(q);return true;
+}
+async function getNextCloudQueueItem(){
+ const dbItems=await cloudQueueDbAll();if(dbItems&&dbItems.length)return dbItems[0];
+ const fallback=readCloudWriteQueue().sort((a,b)=>a.createdAt-b.createdAt);return fallback[0]||null;
+}
+async function removeCloudQueueItem(id){await cloudQueueDbDelete(id);writeCloudWriteQueue(readCloudWriteQueue().filter(x=>x.id!==id))}
+async function pumpCloudWriteQueue(){
+ if(cloudWritePump)return cloudWritePump;
+ cloudWritePump=(async()=>{
+  while(state.user&&supabaseClient&&cloudReady){
+   const item=await getNextCloudQueueItem();if(!item)break;
+   if(item.ownerLogin&&item.ownerLogin!==String(state.user?.login||'').toLowerCase()){console.warn('Cloud queue paused: queued changes belong to another account.');break;}
+   const ready=await waitForRealtimeForQueue();if(!ready)break;
+   updateCloudActivity(item.activityId,{syncStatus:'Отправляется',syncError:''});
+   try{
+    await pushCloudStateRaw(item.snapshot);
+    await removeCloudQueueItem(item.id);
+    updateCloudActivity(item.activityId,{syncStatus:'Отправлено',syncSentAt:new Date().toLocaleString('ru-RU'),syncError:''});
+   }catch(error){
+    updateCloudActivity(item.activityId,{syncStatus:'Ожидает повторной отправки',syncError:String(error?.message||error)});
+    setRealtimeIndicator('error','Ошибка отправки');
+    // Retry transient write errors without requiring a full Realtime reconnect.
+    clearTimeout(cloudQueueRetryTimer);cloudQueueRetryTimer=setTimeout(()=>{if(state.user&&realtimeSubscribed)pumpCloudWriteQueue()},4000);
+    break;
+   }
+  }
+ })().finally(()=>{cloudWritePump=null});
+ return cloudWritePump;
+}
+async function restoreCloudWriteQueue(){
+ let legacy=readCloudWriteQueue();
+ try{const old=JSON.parse(localStorage.getItem(CLOUD_WRITE_QUEUE_LEGACY_KEY)||'[]');if(Array.isArray(old)&&old.length)legacy=[...old,...legacy];safeLocalStorageSetItem(CLOUD_WRITE_QUEUE_LEGACY_KEY,'[]')}catch(_){}
+ // Old queue records had no snapshots and cannot safely be replayed as individual writes.
+ // Preserve their activity rows and enqueue one fresh, complete current snapshot.
+ if(legacy.length){writeCloudWriteQueue([]);legacy.forEach(q=>updateCloudActivity(q.activityId,{syncStatus:'Ожидает восстановления',syncError:'Старый формат очереди; будет сохранено текущее состояние'}));}
+ const dbItems=await cloudQueueDbAll();
+ if(legacy.length&&!dbItems?.length&&state.user){const activity=addCloudQueueActivity();const snapshot=JSON.parse(JSON.stringify(state));const item={id:'q-'+Date.now()+'-'+(++cloudWriteSequence),createdAt:Date.now(),ownerLogin:String(state.user?.login||'').toLowerCase(),activityId:activity.id,snapshot};await persistCloudQueueItem(item);}
+ pumpCloudWriteQueue();
+}
+function pushCloudStateNow(snapshot=state){
+ if(!state.user)return Promise.resolve(false);
+ let copy;try{copy=JSON.parse(JSON.stringify(snapshot))}catch(error){return Promise.reject(error)}
+ const activity=addCloudQueueActivity();
+ if(!Array.isArray(copy.logs))copy.logs=[];copy.logs.unshift({...activity});if(copy.logs.length>STORAGE_LOG_LIMIT)copy.logs.length=STORAGE_LOG_LIMIT;
+ const item={id:'q-'+Date.now()+'-'+(++cloudWriteSequence)+'-'+Math.random().toString(36).slice(2,7),createdAt:Date.now(),ownerLogin:String(state.user?.login||'').toLowerCase(),activityId:activity.id,snapshot:copy};
+ return persistCloudQueueItem(item).then(()=>{pumpCloudWriteQueue();return true});
 }
 const PENDING_SYNC_KEY='av_pending_sync_v1';
 const SYNC_HISTORY_KEY='av_sync_history_v1';
@@ -1562,8 +1602,8 @@ function writeSyncHistory(items){safeLocalStorageSetItem(SYNC_HISTORY_KEY,JSON.s
 function queuePendingSync(reason='Изменения приложения'){if(!state.user)return;const items=readPendingSync();const last=(state.logs||[])[0]||{};const now=Date.now();const item={id:'sync-'+now+'-'+Math.random().toString(36).slice(2,7),createdAt:now,user:state.user.name||state.user.login,action:last.action||'Изменение данных',summary:[last.object,last.details].filter(Boolean).join(' — ')||reason,status:'Ожидает отправления',reason:!navigator.onLine?'Нет подключения к интернету':String(reason||'Сервер временно недоступен'),attempts:0};items.unshift(item);writePendingSync(items);renderPendingSyncBadge()}
 function renderPendingSyncBadge(){const items=readPendingSync();const label=document.getElementById('realtimeSyncLabel');if(!label)return;if(items.length){label.textContent=`Ожидают отправки: ${items.length}`;return}if(!navigator.onLine)setRealtimeIndicator('offline','Нет связи');else if(supabaseClient&&cloudReady)setRealtimeIndicator('live','В реальном времени')}
 async function flushPendingSync(){if(pendingSyncInProgress||!state.user||!supabaseClient||!cloudReady||!navigator.onLine)return;const items=readPendingSync();if(!items.length){renderPendingSyncBadge();return}pendingSyncInProgress=true;const startedAt=Date.now();try{const synced=await pushCloudStateNow();if(!synced)throw new Error('Синхронизация пока недоступна');const sentIds=new Set(items.map(x=>x.id));writePendingSync(readPendingSync().filter(x=>!sentIds.has(x.id)));const sent=items.map(x=>({...x,status:'Отправлено',reason:'',sentAt:Date.now()}));writeSyncHistory([...sent,...readSyncHistory()]);state.logs.unshift({id:Date.now(),user:state.user?.name||state.user?.login||'Система',action:'Актуализация локальных данных',object:`Отправлено изменений: ${sent.length}`,service:'',details:sent.map(x=>x.summary||x.action).filter(Boolean).join('; ').slice(0,1800),date:new Date().toLocaleString('ru-RU')});safeLocalStorageSetItem('av_logs',JSON.stringify((state.logs||[]).slice(0,STORAGE_LOG_LIMIT)));try{await pushCloudStateNow()}catch(logError){console.warn('Данные синхронизированы, но запись журнала пока не отправлена:',logError)}setRealtimeIndicator('live','В реальном времени');renderPendingSyncBadge()}catch(e){const message=String(e?.message||e||'Неизвестная ошибка');const current=readPendingSync().map(x=>({...x,attempts:Number(x.attempts||0)+1,lastAttemptAt:Date.now(),status:'Ожидает отправления',reason:message}));writePendingSync(current);console.warn('Pending sync still waiting:',e);setRealtimeIndicator('error','Ошибка синхронизации');renderPendingSyncBadge()}finally{pendingSyncInProgress=false;if(Date.now()-startedAt>0&&document.getElementById('modalBox')?.innerHTML.includes('Синхронизация изменений'))showSyncDetails()}}
-function pushCloudState(){if(!state.user)return;clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(async()=>{if(!state.user)return;try{await pushCloudStateNow();if(readPendingSync().length)await flushPendingSync()}catch(e){console.error('Supabase save queued for retry',e);setRealtimeIndicator('error','Ожидание подключения');renderPendingSyncBadge()}},0)}
-window.addEventListener('online',()=>{setRealtimeIndicator('syncing','Восстановление связи…');setTimeout(()=>flushPendingSync(),300)});window.addEventListener('offline',()=>{setRealtimeIndicator('offline','Нет связи');renderPendingSyncBadge()});
+function pushCloudState(){if(!state.user)return;const snapshot=JSON.parse(JSON.stringify(state));pushCloudStateNow(snapshot).then(()=>{if(readPendingSync().length)flushPendingSync()}).catch(e=>{console.error('Supabase save queued for retry',e);setRealtimeIndicator('error','Ожидание подключения');renderPendingSyncBadge()})}
+window.addEventListener('online',()=>{setRealtimeIndicator('syncing','Восстановление связи…');setTimeout(()=>{pumpCloudWriteQueue();flushPendingSync()},300)});window.addEventListener('offline',()=>{setRealtimeIndicator('offline','Нет связи');renderPendingSyncBadge()});
 function showSyncDetails(){const pending=readPendingSync(),history=readSyncHistory();const all=[...pending,...history].sort((a,b)=>Number(b.createdAt)-Number(a.createdAt));openModal();document.getElementById('modalBox').innerHTML=`<div class="modal-head"><h2>Синхронизация изменений</h2><button class="btn" onclick="closeModal()">Закрыть</button></div><p class="muted">История и ожидающие изменения хранятся локально в этом браузере до 32 часов. При восстановлении соединения приложение повторит отправку.</p><div class="table-wrap"><table><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Информация</th><th>Статус</th><th>Причина / попытки</th></tr></thead><tbody>${all.map(x=>`<tr><td>${esc(new Date(x.createdAt).toLocaleString('ru-RU'))}</td><td>${esc(x.user||'—')}</td><td>${esc(x.action||'Изменение')}</td><td>${esc(x.summary||'')}</td><td>${esc(x.status||'Ожидает отправления')}</td><td>${esc([x.reason,x.attempts?`Попыток: ${x.attempts}`:''].filter(Boolean).join(' · ')||'—')}</td></tr>`).join('')||'<tr><td colspan="6">Нет ожидающих изменений</td></tr>'}</tbody></table></div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" onclick="flushPendingSync()">Повторить отправку</button></div>`}
 
 const FIXED_ACCOUNTS={
@@ -1636,11 +1676,11 @@ function setAccountBackground(login) {
 let realtimeChannel=null,realtimeRefreshTimer=null,realtimeRefreshBusy=false,realtimeLastEventAt=0,realtimeReconnectTimer=null;
 function setRealtimeIndicator(status,message){const el=document.getElementById('realtimeSyncIndicator'),label=document.getElementById('realtimeSyncLabel');if(!el)return;el.dataset.state=status;if(label)label.textContent=message||({connecting:'Синхронизация',syncing:'Обновление…',live:'В реальном времени',offline:'Нет связи',error:'Ошибка синхронизации'}[status]||'Синхронизация');el.title=status==='live'?'Supabase Realtime подключён'+(realtimeLastEventAt?' · последнее обновление '+new Date(realtimeLastEventAt).toLocaleTimeString('ru-RU'):''):({connecting:'Подключение к Supabase Realtime',syncing:'Получение свежих данных из Supabase',offline:'Нет соединения с Supabase Realtime',error:'Не удалось обновить данные из Supabase'}[status]||'Состояние синхронизации')}
 function persistRealtimeSnapshot(){try{safeLocalStorageSetItem('av_services',JSON.stringify(state.services||[]));safeLocalStorageSetItem('av_deliveries',JSON.stringify(state.deliveries||[]));safeLocalStorageSetItem('av_site_settings',JSON.stringify(state.siteSettings||{}));safeLocalStorageSetItem('av_announcements',JSON.stringify(state.announcements||[]));safeLocalStorageSetItem('av_logs',JSON.stringify(state.logs||[]));safeLocalStorageSetItem('av_sales',JSON.stringify(state.sales||[]));safeLocalStorageSetItem('av_sales_archive',JSON.stringify(state.salesArchive||[]));safeLocalStorageSetItem('av_wallet_rows',JSON.stringify(state.walletRows||[]));safeLocalStorageSetItem('av_wallet_archive',JSON.stringify(state.walletArchive||[]));safeLocalStorageSetItem('av_delivery_categories',JSON.stringify(state.deliveryCategories||[]));safeLocalStorageSetItem('av_delivery_report_bindings',JSON.stringify(state.reportBindings||{}));safeLocalStorageSetItem('av_event_settings',JSON.stringify(state.eventSettings||{}));safeLocalStorageSetItem('av_tab_orders',JSON.stringify(state.tabOrders||{}));safeLocalStorageSetItem('av_groups',JSON.stringify(state.groups||[]));safeLocalStorageSetItem('av_permissions',JSON.stringify(state.permissions||[]));}catch(e){console.warn('Realtime local snapshot failed',e)}}
-async function refreshFromRealtime(reason='изменение'){if(!supabaseClient||!state.user||realtimeRefreshBusy)return;if(readPendingSync().length){await flushPendingSync();if(readPendingSync().length)return}realtimeRefreshBusy=true;setRealtimeIndicator('syncing','Обновление…');try{const page=document.querySelector('.nav button.active')?.dataset.page;/* Во время просмотра документа для печати не перерисовываем страницу: realtime-события не должны закрывать документ или сбрасывать его положение. После выхода из просмотра список обновится при следующем событии/переходе. */const keepPrintableDocumentOpen=!!document.querySelector('.doc-toolbar')&&!!document.querySelector('.document-page');await loadCloudState();await loadCloudCollections();persistRealtimeSnapshot();realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');if(page&&!keepPrintableDocumentOpen)render(page);if(page==='serviceAct'||page==='productOrders')setTimeout(checkDeliveryNotifications,80)}catch(e){console.warn('Realtime refresh failed:',e);setRealtimeIndicator('error','Ошибка синхронизации')}finally{realtimeRefreshBusy=false}}
+async function refreshFromRealtime(reason='изменение'){if(!supabaseClient||!state.user||realtimeRefreshBusy)return;const queuedCloud=await getNextCloudQueueItem();if(queuedCloud){console.info('Realtime refresh postponed: local writes are still queued.');return;}if(readPendingSync().length){await flushPendingSync();if(readPendingSync().length)return}realtimeRefreshBusy=true;setRealtimeIndicator('syncing','Обновление…');try{const page=document.querySelector('.nav button.active')?.dataset.page;/* Во время просмотра документа для печати не перерисовываем страницу: realtime-события не должны закрывать документ или сбрасывать его положение. После выхода из просмотра список обновится при следующем событии/переходе. */const keepPrintableDocumentOpen=!!document.querySelector('.doc-toolbar')&&!!document.querySelector('.document-page');await loadCloudState();await loadCloudCollections();persistRealtimeSnapshot();realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');if(page&&!keepPrintableDocumentOpen)render(page);if(page==='serviceAct'||page==='productOrders')setTimeout(checkDeliveryNotifications,80)}catch(e){console.warn('Realtime refresh failed:',e);setRealtimeIndicator('error','Ошибка синхронизации')}finally{realtimeRefreshBusy=false}}
 function scheduleRealtimeRefresh(reason){realtimeLastEventAt=Date.now();setRealtimeIndicator('syncing','Обновление…');clearTimeout(realtimeRefreshTimer);realtimeRefreshTimer=setTimeout(()=>refreshFromRealtime(reason),180)}
-function stopRealtimeSync(){if(realtimeChannel&&supabaseClient){try{supabaseClient.removeChannel(realtimeChannel)}catch(_){}}realtimeChannel=null;clearTimeout(realtimeRefreshTimer);clearTimeout(realtimeReconnectTimer);realtimeRefreshTimer=null;realtimeReconnectTimer=null;setRealtimeIndicator('offline','Нет связи')}
+function stopRealtimeSync(){realtimeSubscribed=false;if(realtimeChannel&&supabaseClient){try{supabaseClient.removeChannel(realtimeChannel)}catch(_){}}realtimeChannel=null;clearTimeout(realtimeRefreshTimer);clearTimeout(realtimeReconnectTimer);realtimeRefreshTimer=null;realtimeReconnectTimer=null;setRealtimeIndicator('offline','Нет связи')}
 function restoreCloudWriteQueue(){const queued=readCloudWriteQueue();if(!queued.length||!state.user)return;queued.forEach(q=>updateCloudActivity(q.activityId,{syncStatus:'Восстановлено из очереди',syncError:''}));writeCloudWriteQueue([]);pushCloudStateNow().catch(e=>console.warn('Не удалось отправить восстановленную очередь:',e))}
-function startRealtimeSync(){if(!supabaseClient||!state.user)return;stopRealtimeSync();setRealtimeIndicator('connecting','Подключение…');realtimeChannel=supabaseClient.channel('orhei-live-sync-main').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.main'},()=>scheduleRealtimeRefresh('app_state')).on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>scheduleRealtimeRefresh('services')).on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>scheduleRealtimeRefresh('orders')).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>scheduleRealtimeRefresh('profiles')).subscribe(status=>{if(status==='SUBSCRIBED'){realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');restoreCloudWriteQueue();flushPendingSync()}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){setRealtimeIndicator('error','Нет синхронизации');clearTimeout(realtimeReconnectTimer);realtimeReconnectTimer=setTimeout(()=>{if(state.user)startRealtimeSync()},5000)}else if(status==='CLOSED'){setRealtimeIndicator('offline','Нет связи')}})}
+function startRealtimeSync(){if(!supabaseClient||!state.user)return;stopRealtimeSync();setRealtimeIndicator('connecting','Подключение…');realtimeChannel=supabaseClient.channel('orhei-live-sync-main').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.main'},()=>scheduleRealtimeRefresh('app_state')).on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>scheduleRealtimeRefresh('services')).on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>scheduleRealtimeRefresh('orders')).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>scheduleRealtimeRefresh('profiles')).subscribe(status=>{if(status==='SUBSCRIBED'){realtimeSubscribed=true;realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');restoreCloudWriteQueue();flushPendingSync()}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){realtimeSubscribed=false;setRealtimeIndicator('error','Нет синхронизации');clearTimeout(realtimeReconnectTimer);realtimeReconnectTimer=setTimeout(()=>{if(state.user)startRealtimeSync()},5000)}else if(status==='CLOSED'){realtimeSubscribed=false;setRealtimeIndicator('offline','Нет связи')}})}
 function withLoginTimeout(promise,ms,label){
  let timer;
  return Promise.race([
