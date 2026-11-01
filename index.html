@@ -811,6 +811,15 @@ body:has(#login.hidden) { overflow:hidden !important; }
   transform:translateY(-1px);
 }
 #login .login-submit b{font-size:22px;font-weight:500;line-height:1}
+#login .login-submit.is-loading{opacity:.88;cursor:wait;pointer-events:none;transform:none!important}
+#login .login-submit .login-spinner{display:none;width:17px;height:17px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:loginSpin .75s linear infinite}
+#login .login-submit.is-loading .login-spinner{display:inline-block}
+#login .login-submit.is-loading b{display:none}
+#login .login-message{display:none;margin-top:12px;padding:10px 12px;border:1px solid rgba(255,65,82,.45);border-radius:8px;background:rgba(180,12,34,.13);color:#ff9aa5;font-size:13px;line-height:1.4}
+#login .login-message.visible{display:block}
+#login .login-message.success{border-color:rgba(67,190,125,.4);color:#8ee0ae}
+@keyframes loginSpin{to{transform:rotate(360deg)}}
+
 .login-footer{
   display:flex;align-items:center;gap:8px;margin-top:24px;
   padding-top:15px;border-top:1px solid rgba(255,255,255,.08);
@@ -1163,8 +1172,9 @@ body.app-active { overflow:hidden !important; }
     <form id="loginForm">
       <label>Логин</label><input id="loginUser" required value="" autocomplete="username" placeholder="Введите логин">
       <label>Пароль</label><input id="loginPass" type="password" required value="" autocomplete="current-password" placeholder="Введите пароль">
-      <button class="btn primary login-submit" type="submit"><span>Войти</span><b>→</b></button>
-    </form>
+      <button class="btn primary login-submit" type="submit"><span class="login-submit-label">Войти</span><span class="login-spinner" aria-hidden="true"></span><b>→</b></button>
+      <div id="loginMessage" class="login-message" role="alert" aria-live="polite"></div>
+     </form>
     <div class="login-footer"><span class="login-dot"></span> Bomba A11 · Secure access</div>
   </div>
 </div>
@@ -1584,12 +1594,19 @@ function stopRealtimeSync(){if(realtimeChannel&&supabaseClient){try{supabaseClie
 function startRealtimeSync(){if(!supabaseClient||!state.user)return;stopRealtimeSync();setRealtimeIndicator('connecting','Подключение…');realtimeChannel=supabaseClient.channel('orhei-live-sync-main').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.main'},()=>scheduleRealtimeRefresh('app_state')).on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>scheduleRealtimeRefresh('services')).on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>scheduleRealtimeRefresh('orders')).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>scheduleRealtimeRefresh('profiles')).subscribe(status=>{if(status==='SUBSCRIBED'){realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');flushPendingSync()}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){setRealtimeIndicator('error','Нет синхронизации');clearTimeout(realtimeReconnectTimer);realtimeReconnectTimer=setTimeout(()=>{if(state.user)startRealtimeSync()},5000)}else if(status==='CLOSED'){setRealtimeIndicator('offline','Нет связи')}})}
 async function login(e){
  e.preventDefault();
- const u=document.getElementById('loginUser').value.trim(), p=document.getElementById('loginPass').value;
- if(!supabaseClient){ alert('Supabase не подключён. Проверьте config.js.'); return; }
- if(!u||!p)return;
+ const form=document.getElementById('loginForm'),button=form.querySelector('.login-submit'),message=document.getElementById('loginMessage');
+ const u=document.getElementById('loginUser').value.trim(),p=document.getElementById('loginPass').value;
+ const showMessage=(text,kind='error')=>{message.textContent=text;message.className='login-message visible'+(kind==='success'?' success':'')};
+ message.textContent='';message.className='login-message';
+ if(!supabaseClient){showMessage('Supabase не подключён. Проверьте config.js.');return;}
+ if(!u||!p){showMessage('Введите логин и пароль.');return;}
+ if(button.disabled)return;
+ button.disabled=true;button.classList.add('is-loading');button.setAttribute('aria-busy','true');
+ const label=button.querySelector('.login-submit-label');label.textContent='Выполняется вход…';
+ let authRejected=false;
  try{
    const {data,error}=await supabaseClient.auth.signInWithPassword({email:cloudEmail(u),password:p});
-   if(error) throw error;
+   if(error){authRejected=true;throw error;}
    const cloudUser=data.user;
    const hasPendingLocal=readPendingSync().length>0;
    const hadCloud=hasPendingLocal?true:await loadCloudState();
@@ -1599,13 +1616,13 @@ async function login(e){
    let found=(state.users||[]).find(x=>String(x.login||'').toLowerCase()===u.toLowerCase());
    if(found && found.status==='Неактивен'){
      await supabaseClient.auth.signOut();
-     alert('Эта учётная запись отключена администратором.');
+     showMessage('Эта учётная запись отключена администратором.');
      return;
    }
    if(!hadCloud){ await pushCloudStateNow(); }
    const meta=cloudUser.user_metadata||{};
    const loginTime=new Date().toISOString();
-   if(found){found.lastLoginAt=loginTime;found.last= new Date().toLocaleString('ru-RU');}
+   if(found){found.lastLoginAt=loginTime;found.last=new Date().toLocaleString('ru-RU');}
    state.user={...(found||{}),id:found?.id||cloudUser.id,name:found?.name||meta.display_name||u,login:u,group:found?.group||meta.group_name||'Сотрудник',permissions:found?.permissions||meta.permissions||[],lastLoginAt:loginTime};
    save();
    await pushCloudStateNow();
@@ -1625,7 +1642,14 @@ async function login(e){
    log('Вход в систему','Авторизация');
    const firstWorkTab=getTabOrder(state.user.login).find(id=>{const button=document.querySelector(`.nav button[data-page="${id}"]`);return !!button&&button.style.display!=='none'});
    navigate(firstWorkTab||'service');
- }catch(err){ console.error(err); alert('Не удалось войти или загрузить данные Supabase: '+(err?.message||'проверьте логин, пароль и доступ к базе.')); }
+ }catch(err){
+   console.error(err);
+   const msg=String(err?.message||'').toLowerCase();
+   if(authRejected||msg.includes('invalid login credentials')||msg.includes('invalid_credentials'))showMessage('Неверный логин или пароль. Проверьте введённые данные.');
+   else showMessage('Не удалось выполнить вход. Проверьте подключение к Supabase и попробуйте снова.');
+ }finally{
+   button.disabled=false;button.classList.remove('is-loading');button.removeAttribute('aria-busy');label.textContent='Войти';
+ }
 }
 const STORAGE_MONITOR_REFRESH_MS=5*60*1000;
 let storageMonitorTimer=null,storageMonitorBusy=false,storageMonitorExpanded=false;
