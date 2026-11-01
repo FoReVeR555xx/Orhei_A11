@@ -1356,8 +1356,8 @@ const CLOUD_STATE_ID='main';
 let cloudReady=false;
 let cloudSaveTimer=null;
 function cloudEmail(login){ return String(login||'').trim().toLowerCase()+'@bomba.local'; }
-function cloudSafeState(){
-  const clean=JSON.parse(JSON.stringify(state));
+function cloudSafeState(source=state){
+  const clean=JSON.parse(JSON.stringify(source));
   delete clean.user;
   // Normalized tables are authoritative for users, services and deliveries.
   delete clean.users;
@@ -1471,26 +1471,26 @@ const SUPABASE_MAX_ATTEMPTS = 3;
 let supabaseRetryNoticeShown = false;
 function waitForSupabaseRetry(){return new Promise(resolve=>setTimeout(resolve,SUPABASE_RETRY_DELAY_MS));}
 function supabaseConnectionError(){return new Error('Не удалось выполнить действие из-за проблем с подключением к Supabase. Попробуйте снова.');}
-async function pushCloudStateAttempt(){
+async function pushCloudStateAttempt(snapshot=state){
   if(!navigator.onLine) throw new Error('Нет подключения к интернету');
   if(!supabaseClient) throw new Error('Клиент Supabase не настроен');
   if(!cloudReady) throw new Error('Подключение к Supabase ещё не готово');
   const {data:{user},error:userError}=await supabaseClient.auth.getUser();
   if(userError) throw userError;
   if(!user) throw new Error('Сессия пользователя Supabase не найдена');
-  const servicesJson=await persistNormalizedCollection('services',state.services||[],'service',lastCloudServicesJson);
-  const ordersJson=await persistNormalizedCollection('orders',state.deliveries||[],'order',lastCloudOrdersJson);
-  const {error}=await supabaseClient.from('app_state').upsert({id:CLOUD_STATE_ID,payload:cloudSafeState(),updated_at:new Date().toISOString(),updated_by:user.id});
+  const servicesJson=await persistNormalizedCollection('services',snapshot.services||[],'service',lastCloudServicesJson);
+  const ordersJson=await persistNormalizedCollection('orders',snapshot.deliveries||[],'order',lastCloudOrdersJson);
+  const {error}=await supabaseClient.from('app_state').upsert({id:CLOUD_STATE_ID,payload:cloudSafeState(snapshot),updated_at:new Date().toISOString(),updated_by:user.id});
   if(error) throw error;
   lastCloudServicesJson=servicesJson;
   lastCloudOrdersJson=ordersJson;
   return true;
 }
-async function pushCloudStateNow(){
+async function pushCloudStateRaw(snapshot=state){
   let lastError=null;
   for(let attempt=1;attempt<=SUPABASE_MAX_ATTEMPTS;attempt++){
     try{
-      const saved=await pushCloudStateAttempt();
+      const saved=await pushCloudStateAttempt(snapshot);
       if(!saved) throw new Error('Supabase не подтвердил сохранение');
       supabaseRetryNoticeShown=false;
       return true;
@@ -1503,6 +1503,54 @@ async function pushCloudStateNow(){
   setRealtimeIndicator('error','Ошибка синхронизации');
   throw supabaseConnectionError();
 }
+// All cloud writes pass through one FIFO queue. Realtime must be subscribed before
+// a queued snapshot is sent; otherwise the item waits and checks again in 2 seconds.
+const CLOUD_WRITE_QUEUE_KEY='av_cloud_write_queue_v1';
+let cloudWriteQueue=Promise.resolve();
+let cloudWriteSequence=0;
+function readCloudWriteQueue(){try{return JSON.parse(localStorage.getItem(CLOUD_WRITE_QUEUE_KEY)||'[]').filter(x=>Date.now()-Number(x.createdAt||0)<7*24*60*60*1000)}catch(_){return []}}
+function writeCloudWriteQueue(items){safeLocalStorageSetItem(CLOUD_WRITE_QUEUE_KEY,JSON.stringify(items.slice(-500)))}
+function updateCloudActivity(entryId,patch){const item=(state.logs||[]).find(x=>String(x.id)===String(entryId));if(item){Object.assign(item,patch);safeLocalStorageSetItem('av_logs',JSON.stringify((state.logs||[]).slice(0,STORAGE_LOG_LIMIT)));}}
+function addCloudQueueActivity(){
+  const last=(state.logs||[])[0]||{};const now=Date.now();
+  const recent=last.date&&!last.queueId&&Number.isFinite(parseLogDate(last.date))&&now-parseLogDate(last.date)<5000;
+  const entry=recent?last:{id:'cloud-'+now+'-'+(++cloudWriteSequence),user:state.user?.name||state.user?.login||'Система',action:'Изменение данных',object:'Сохранение данных приложения',service:'',details:'Изменение поставлено в очередь отправки',date:new Date(now).toLocaleString('ru-RU')};
+  if(!recent){state.logs.unshift(entry);if(state.logs.length>STORAGE_LOG_LIMIT)state.logs.length=STORAGE_LOG_LIMIT;}
+  entry.syncStatus='В очереди';entry.queueId='q-'+now+'-'+cloudWriteSequence;
+  safeLocalStorageSetItem('av_logs',JSON.stringify(state.logs.slice(0,STORAGE_LOG_LIMIT)));
+  const q=readCloudWriteQueue();q.push({id:entry.queueId,createdAt:now,activityId:entry.id,status:'В очереди'});writeCloudWriteQueue(q);
+  return entry;
+}
+async function waitForRealtimeForQueue(){
+  while(state.user&&supabaseClient&&cloudReady){
+    const status=document.getElementById('realtimeSyncIndicator')?.dataset.state;
+    if(navigator.onLine&&status==='live')return true;
+    await new Promise(resolve=>setTimeout(resolve,2000));
+  }
+  return false;
+}
+function pushCloudStateNow(){
+  if(!state.user)return Promise.resolve(false);
+  const activity=addCloudQueueActivity();
+  let snapshot;try{snapshot=JSON.parse(JSON.stringify(state))}catch(_){snapshot=state}
+  const task=async()=>{
+    try{
+      const ready=await waitForRealtimeForQueue();
+      if(!ready)throw new Error('Сессия завершена или подключение недоступно');
+      updateCloudActivity(activity.id,{syncStatus:'Отправляется'});
+      const result=await pushCloudStateRaw(snapshot);
+      updateCloudActivity(activity.id,{syncStatus:'Отправлено',syncSentAt:new Date().toLocaleString('ru-RU')});
+      const q=readCloudWriteQueue().filter(x=>x.id!==activity.queueId);writeCloudWriteQueue(q);
+      return result;
+    }catch(error){
+      updateCloudActivity(activity.id,{syncStatus:'Ожидает повторной отправки',syncError:String(error?.message||error)});
+      throw error;
+    }
+  };
+  const result=cloudWriteQueue.then(task,task);
+  cloudWriteQueue=result.catch(()=>{});
+  return result;
+}
 const PENDING_SYNC_KEY='av_pending_sync_v1';
 const SYNC_HISTORY_KEY='av_sync_history_v1';
 let pendingSyncInProgress=false;
@@ -1514,7 +1562,7 @@ function writeSyncHistory(items){safeLocalStorageSetItem(SYNC_HISTORY_KEY,JSON.s
 function queuePendingSync(reason='Изменения приложения'){if(!state.user)return;const items=readPendingSync();const last=(state.logs||[])[0]||{};const now=Date.now();const item={id:'sync-'+now+'-'+Math.random().toString(36).slice(2,7),createdAt:now,user:state.user.name||state.user.login,action:last.action||'Изменение данных',summary:[last.object,last.details].filter(Boolean).join(' — ')||reason,status:'Ожидает отправления',reason:!navigator.onLine?'Нет подключения к интернету':String(reason||'Сервер временно недоступен'),attempts:0};items.unshift(item);writePendingSync(items);renderPendingSyncBadge()}
 function renderPendingSyncBadge(){const items=readPendingSync();const label=document.getElementById('realtimeSyncLabel');if(!label)return;if(items.length){label.textContent=`Ожидают отправки: ${items.length}`;return}if(!navigator.onLine)setRealtimeIndicator('offline','Нет связи');else if(supabaseClient&&cloudReady)setRealtimeIndicator('live','В реальном времени')}
 async function flushPendingSync(){if(pendingSyncInProgress||!state.user||!supabaseClient||!cloudReady||!navigator.onLine)return;const items=readPendingSync();if(!items.length){renderPendingSyncBadge();return}pendingSyncInProgress=true;const startedAt=Date.now();try{const synced=await pushCloudStateNow();if(!synced)throw new Error('Синхронизация пока недоступна');const sentIds=new Set(items.map(x=>x.id));writePendingSync(readPendingSync().filter(x=>!sentIds.has(x.id)));const sent=items.map(x=>({...x,status:'Отправлено',reason:'',sentAt:Date.now()}));writeSyncHistory([...sent,...readSyncHistory()]);state.logs.unshift({id:Date.now(),user:state.user?.name||state.user?.login||'Система',action:'Актуализация локальных данных',object:`Отправлено изменений: ${sent.length}`,service:'',details:sent.map(x=>x.summary||x.action).filter(Boolean).join('; ').slice(0,1800),date:new Date().toLocaleString('ru-RU')});safeLocalStorageSetItem('av_logs',JSON.stringify((state.logs||[]).slice(0,STORAGE_LOG_LIMIT)));try{await pushCloudStateNow()}catch(logError){console.warn('Данные синхронизированы, но запись журнала пока не отправлена:',logError)}setRealtimeIndicator('live','В реальном времени');renderPendingSyncBadge()}catch(e){const message=String(e?.message||e||'Неизвестная ошибка');const current=readPendingSync().map(x=>({...x,attempts:Number(x.attempts||0)+1,lastAttemptAt:Date.now(),status:'Ожидает отправления',reason:message}));writePendingSync(current);console.warn('Pending sync still waiting:',e);setRealtimeIndicator('error','Ошибка синхронизации');renderPendingSyncBadge()}finally{pendingSyncInProgress=false;if(Date.now()-startedAt>0&&document.getElementById('modalBox')?.innerHTML.includes('Синхронизация изменений'))showSyncDetails()}}
-function pushCloudState(){if(!state.user)return;clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(async()=>{if(!state.user)return;try{await pushCloudStateNow();if(readPendingSync().length)await flushPendingSync()}catch(e){console.error('Supabase save failed after retries',e);setRealtimeIndicator('error','Ошибка синхронизации');if(!supabaseRetryNoticeShown){supabaseRetryNoticeShown=true;alert('Не удалось выполнить действие из-за проблем с подключением к Supabase. Попробуйте снова.')}}},250)}
+function pushCloudState(){if(!state.user)return;clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(async()=>{if(!state.user)return;try{await pushCloudStateNow();if(readPendingSync().length)await flushPendingSync()}catch(e){console.error('Supabase save queued for retry',e);setRealtimeIndicator('error','Ожидание подключения');renderPendingSyncBadge()}},0)}
 window.addEventListener('online',()=>{setRealtimeIndicator('syncing','Восстановление связи…');setTimeout(()=>flushPendingSync(),300)});window.addEventListener('offline',()=>{setRealtimeIndicator('offline','Нет связи');renderPendingSyncBadge()});
 function showSyncDetails(){const pending=readPendingSync(),history=readSyncHistory();const all=[...pending,...history].sort((a,b)=>Number(b.createdAt)-Number(a.createdAt));openModal();document.getElementById('modalBox').innerHTML=`<div class="modal-head"><h2>Синхронизация изменений</h2><button class="btn" onclick="closeModal()">Закрыть</button></div><p class="muted">История и ожидающие изменения хранятся локально в этом браузере до 32 часов. При восстановлении соединения приложение повторит отправку.</p><div class="table-wrap"><table><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Информация</th><th>Статус</th><th>Причина / попытки</th></tr></thead><tbody>${all.map(x=>`<tr><td>${esc(new Date(x.createdAt).toLocaleString('ru-RU'))}</td><td>${esc(x.user||'—')}</td><td>${esc(x.action||'Изменение')}</td><td>${esc(x.summary||'')}</td><td>${esc(x.status||'Ожидает отправления')}</td><td>${esc([x.reason,x.attempts?`Попыток: ${x.attempts}`:''].filter(Boolean).join(' · ')||'—')}</td></tr>`).join('')||'<tr><td colspan="6">Нет ожидающих изменений</td></tr>'}</tbody></table></div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" onclick="flushPendingSync()">Повторить отправку</button></div>`}
 
@@ -1591,7 +1639,8 @@ function persistRealtimeSnapshot(){try{safeLocalStorageSetItem('av_services',JSO
 async function refreshFromRealtime(reason='изменение'){if(!supabaseClient||!state.user||realtimeRefreshBusy)return;if(readPendingSync().length){await flushPendingSync();if(readPendingSync().length)return}realtimeRefreshBusy=true;setRealtimeIndicator('syncing','Обновление…');try{const page=document.querySelector('.nav button.active')?.dataset.page;/* Во время просмотра документа для печати не перерисовываем страницу: realtime-события не должны закрывать документ или сбрасывать его положение. После выхода из просмотра список обновится при следующем событии/переходе. */const keepPrintableDocumentOpen=!!document.querySelector('.doc-toolbar')&&!!document.querySelector('.document-page');await loadCloudState();await loadCloudCollections();persistRealtimeSnapshot();realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');if(page&&!keepPrintableDocumentOpen)render(page);if(page==='serviceAct'||page==='productOrders')setTimeout(checkDeliveryNotifications,80)}catch(e){console.warn('Realtime refresh failed:',e);setRealtimeIndicator('error','Ошибка синхронизации')}finally{realtimeRefreshBusy=false}}
 function scheduleRealtimeRefresh(reason){realtimeLastEventAt=Date.now();setRealtimeIndicator('syncing','Обновление…');clearTimeout(realtimeRefreshTimer);realtimeRefreshTimer=setTimeout(()=>refreshFromRealtime(reason),180)}
 function stopRealtimeSync(){if(realtimeChannel&&supabaseClient){try{supabaseClient.removeChannel(realtimeChannel)}catch(_){}}realtimeChannel=null;clearTimeout(realtimeRefreshTimer);clearTimeout(realtimeReconnectTimer);realtimeRefreshTimer=null;realtimeReconnectTimer=null;setRealtimeIndicator('offline','Нет связи')}
-function startRealtimeSync(){if(!supabaseClient||!state.user)return;stopRealtimeSync();setRealtimeIndicator('connecting','Подключение…');realtimeChannel=supabaseClient.channel('orhei-live-sync-main').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.main'},()=>scheduleRealtimeRefresh('app_state')).on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>scheduleRealtimeRefresh('services')).on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>scheduleRealtimeRefresh('orders')).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>scheduleRealtimeRefresh('profiles')).subscribe(status=>{if(status==='SUBSCRIBED'){realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');flushPendingSync()}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){setRealtimeIndicator('error','Нет синхронизации');clearTimeout(realtimeReconnectTimer);realtimeReconnectTimer=setTimeout(()=>{if(state.user)startRealtimeSync()},5000)}else if(status==='CLOSED'){setRealtimeIndicator('offline','Нет связи')}})}
+function restoreCloudWriteQueue(){const queued=readCloudWriteQueue();if(!queued.length||!state.user)return;queued.forEach(q=>updateCloudActivity(q.activityId,{syncStatus:'Восстановлено из очереди',syncError:''}));writeCloudWriteQueue([]);pushCloudStateNow().catch(e=>console.warn('Не удалось отправить восстановленную очередь:',e))}
+function startRealtimeSync(){if(!supabaseClient||!state.user)return;stopRealtimeSync();setRealtimeIndicator('connecting','Подключение…');realtimeChannel=supabaseClient.channel('orhei-live-sync-main').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.main'},()=>scheduleRealtimeRefresh('app_state')).on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>scheduleRealtimeRefresh('services')).on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>scheduleRealtimeRefresh('orders')).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>scheduleRealtimeRefresh('profiles')).subscribe(status=>{if(status==='SUBSCRIBED'){realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');restoreCloudWriteQueue();flushPendingSync()}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){setRealtimeIndicator('error','Нет синхронизации');clearTimeout(realtimeReconnectTimer);realtimeReconnectTimer=setTimeout(()=>{if(state.user)startRealtimeSync()},5000)}else if(status==='CLOSED'){setRealtimeIndicator('offline','Нет связи')}})}
 function withLoginTimeout(promise,ms,label){
  let timer;
  return Promise.race([
@@ -1680,8 +1729,8 @@ function onPresencePageHide(){if(supabaseClient&&state.user){try{supabaseClient.
 function accountPresenceQuickRole(u){const login=String(u?.login||'').trim().toLowerCase(),local=(state.users||[]).find(x=>String(x?.login||'').trim().toLowerCase()===login)||{},groupName=String(u?.group_name||local.group||'').trim().toLocaleLowerCase('ru-RU'),role=String(local.role||local.accountRole||local.user_role||'').trim().toLocaleLowerCase('ru-RU');if(login==='admin'||['владельцы','владелец','owner','owners','администраторы','администратор','admin'].includes(groupName)||['owner','admin','владелец','администратор'].includes(role)||local.isOwner===true||local.is_owner===true)return 'owner';const direct=Array.isArray(local.permissions)?local.permissions:[],group=(state.groups||[]).find(g=>String(g?.name||'').trim().toLocaleLowerCase('ru-RU')===groupName),gp=Array.isArray(group?.permissions)?group.permissions:[];return [...direct,...gp].some(p=>String(p?.key||p).trim().toLowerCase()==='serviceact.create')?'processor':'other'}
 function renderAccountPresenceQuickCards(items){const host=document.getElementById('accountPresenceQuickCards');if(!host)return;const self=String(state.user?.login||'').trim().toLowerCase();const online=(Array.isArray(items)?items:[]).filter(u=>String(u?.login||'').trim().toLowerCase()!==self&&!!u.online&&String(u.status||'Активен')!=='Неактивен').map(u=>({...u,_quickRole:accountPresenceQuickRole(u)})).sort((a,b)=>({owner:0,processor:1,other:2}[a._quickRole]-({owner:0,processor:1,other:2}[b._quickRole])||String(a.display_name||a.login||'').localeCompare(String(b.display_name||b.login||''),'ru'))).slice(0,3);host.innerHTML=online.map(u=>{const role=u._quickRole,display=String(u.display_name||u.login||'Аккаунт');return `<div class="account-presence-quick-card ${role==='owner'?'owner':role==='processor'?'processor':''}" title="${esc(display)} — Онлайн" aria-label="${esc(display)}, Онлайн"><span class="account-presence-quick-name">${esc(display)}</span><span class="account-presence-quick-online">Онлайн</span></div>`}).join('');host.hidden=online.length===0}
 async function loadAccountPresence(){if(!state.user||!supabaseClient||accountPresenceBusy)return;accountPresenceBusy=true;const rows=document.getElementById('accountPresenceRows');if(rows&&!document.getElementById('accountPresencePanel')?.hidden)rows.innerHTML='<div class="muted" style="padding:10px">Обновление списка…</div>';try{const {data,error}=await supabaseClient.rpc('get_account_presence');if(error)throw error;const items=Array.isArray(data)?data:[];renderAccountPresenceQuickCards(items);if(!rows)return;if(!items.length){rows.innerHTML='<div class="muted" style="padding:10px">Нет аккаунтов.</div>';return}rows.innerHTML=items.map(u=>{const online=!!u.online&&String(u.status||'Активен')!=='Неактивен';const display=String(u.display_name||u.login||'Аккаунт');const status=String(u.status||'Активен')==='Неактивен'?'Отключён':online?'● Онлайн':`Был ${accountPresenceAgo(u.last_seen_at)}`;return `<div class="account-presence-row"><div class="account-presence-name"><b>${esc(display)}</b><small>${esc(u.login||'')} · ${esc(u.group_name||'')}</small></div><div class="account-presence-state ${online?'online':''}">${esc(status)}</div></div>`}).join('')}catch(e){renderAccountPresenceQuickCards([]);if(rows&&!document.getElementById('accountPresencePanel')?.hidden)rows.innerHTML=`<div style="padding:10px;color:#fca5a5">Не удалось загрузить аккаунты: ${esc(e?.message||e)}</div>`}finally{accountPresenceBusy=false}}
-function showTodayActivity(){if(!can('activity.view')&&!isSiteOwner()){alert('Недостаточно прав.');return}const now=new Date(),start=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime(),items=(state.logs||[]).filter(x=>{const t=parseLogDate(x.date);return Number.isFinite(t)&&t>=start}).sort((a,b)=>parseLogDate(b.date)-parseLogDate(a.date));openModal();document.getElementById('modalBox').innerHTML=`<div class="modal-head"><h2>Активность за сегодня</h2><button class="btn" onclick="closeModal()">Закрыть</button></div><div class="table-wrap"><table><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Подробности</th></tr></thead><tbody>${items.map(x=>`<tr onclick="closeModal();openLogTarget('${esc(String(x.id))}')" style="cursor:pointer"><td>${esc(x.date)}</td><td>${esc(x.user)}</td><td>${esc(x.action)}</td><td>${esc(x.object||'')}</td><td>${esc(x.details||'')}</td></tr>`).join('')||'<tr><td colspan="5">Сегодня действий пока нет</td></tr>'}</tbody></table></div>`}
-function refreshActivityButton(){const b=document.getElementById('activityButton');if(b)b.style.display=(isSiteOwner()||can('activity.view'))?'inline-flex':'none'}
+function showTodayActivity(){if(!isSiteOwner()){alert('Вкладка «Активность» доступна только владельцу.');return}const now=new Date(),start=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime(),items=(state.logs||[]).filter(x=>{const t=parseLogDate(x.date);return Number.isFinite(t)&&t>=start}).sort((a,b)=>parseLogDate(b.date)-parseLogDate(a.date));openModal();document.getElementById('modalBox').innerHTML=`<div class="modal-head"><h2>Активность за сегодня</h2><button class="btn" onclick="closeModal()">Закрыть</button></div><div class="table-wrap"><table><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Подробности</th><th>Синхронизация</th></tr></thead><tbody>${items.map(x=>`<tr onclick="closeModal();openLogTarget('${esc(String(x.id))}')" style="cursor:pointer"><td>${esc(x.date)}</td><td>${esc(x.user)}</td><td>${esc(x.action)}</td><td>${esc(x.object||'')}</td><td>${esc(x.details||'')}</td><td>${esc(x.syncStatus||'—')}</td></tr>`).join('')||'<tr><td colspan="6">Сегодня действий пока нет</td></tr>'}</tbody></table></div>`}
+function refreshActivityButton(){const b=document.getElementById('activityButton');if(b)b.style.display=isSiteOwner()?'inline-flex':'none'}
 function toggleAccountPresence(){const panel=document.getElementById('accountPresencePanel'),button=document.getElementById('topTitle');if(!panel||!button)return;const opening=panel.hidden;panel.hidden=!opening;button.setAttribute('aria-expanded',String(opening));if(accountPresenceRefreshTimer)clearInterval(accountPresenceRefreshTimer);accountPresenceRefreshTimer=null;if(opening){loadAccountPresence();accountPresenceRefreshTimer=setInterval(()=>{if(!panel.hidden)loadAccountPresence()},45000)}}
 document.addEventListener('click',e=>{const panel=document.getElementById('accountPresencePanel'),button=document.getElementById('topTitle');if(panel&&!panel.hidden&&!panel.contains(e.target)&&!button?.contains(e.target)){panel.hidden=true;button?.setAttribute('aria-expanded','false');if(accountPresenceRefreshTimer)clearInterval(accountPresenceRefreshTimer);accountPresenceRefreshTimer=null}});
 async function logout(){
