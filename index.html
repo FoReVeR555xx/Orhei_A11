@@ -1592,6 +1592,13 @@ async function refreshFromRealtime(reason='изменение'){if(!supabaseClie
 function scheduleRealtimeRefresh(reason){realtimeLastEventAt=Date.now();setRealtimeIndicator('syncing','Обновление…');clearTimeout(realtimeRefreshTimer);realtimeRefreshTimer=setTimeout(()=>refreshFromRealtime(reason),180)}
 function stopRealtimeSync(){if(realtimeChannel&&supabaseClient){try{supabaseClient.removeChannel(realtimeChannel)}catch(_){}}realtimeChannel=null;clearTimeout(realtimeRefreshTimer);clearTimeout(realtimeReconnectTimer);realtimeRefreshTimer=null;realtimeReconnectTimer=null;setRealtimeIndicator('offline','Нет связи')}
 function startRealtimeSync(){if(!supabaseClient||!state.user)return;stopRealtimeSync();setRealtimeIndicator('connecting','Подключение…');realtimeChannel=supabaseClient.channel('orhei-live-sync-main').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.main'},()=>scheduleRealtimeRefresh('app_state')).on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>scheduleRealtimeRefresh('services')).on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>scheduleRealtimeRefresh('orders')).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>scheduleRealtimeRefresh('profiles')).subscribe(status=>{if(status==='SUBSCRIBED'){realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');flushPendingSync()}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){setRealtimeIndicator('error','Нет синхронизации');clearTimeout(realtimeReconnectTimer);realtimeReconnectTimer=setTimeout(()=>{if(state.user)startRealtimeSync()},5000)}else if(status==='CLOSED'){setRealtimeIndicator('offline','Нет связи')}})}
+function withLoginTimeout(promise,ms,label){
+ let timer;
+ return Promise.race([
+  Promise.resolve(promise),
+  new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+' timeout')),ms)})
+ ]).finally(()=>clearTimeout(timer));
+}
 async function login(e){
  e.preventDefault();
  const form=document.getElementById('loginForm'),button=form.querySelector('.login-submit'),message=document.getElementById('loginMessage');
@@ -1605,14 +1612,14 @@ async function login(e){
  const label=button.querySelector('.login-submit-label');label.textContent='Выполняется вход…';
  let authRejected=false;
  try{
-   const {data,error}=await supabaseClient.auth.signInWithPassword({email:cloudEmail(u),password:p});
+   const {data,error}=await withLoginTimeout(supabaseClient.auth.signInWithPassword({email:cloudEmail(u),password:p}),15000,'Supabase auth');
    if(error){authRejected=true;throw error;}
    const cloudUser=data.user;
    const hasPendingLocal=readPendingSync().length>0;
-   const hadCloud=hasPendingLocal?true:await loadCloudState();
+   const hadCloud=hasPendingLocal?true:await withLoginTimeout(loadCloudState(),12000,'Загрузка данных');
    ensurePermissionCatalog();
-   if(!hasPendingLocal) await loadCloudCollections(); else cloudReady=true;
-   await syncCloudProfiles();
+   if(!hasPendingLocal) await withLoginTimeout(loadCloudCollections(),12000,'Загрузка документов'); else cloudReady=true;
+   await withLoginTimeout(syncCloudProfiles(),10000,'Загрузка пользователей');
    let found=(state.users||[]).find(x=>String(x.login||'').toLowerCase()===u.toLowerCase());
    if(found && found.status==='Неактивен'){
      await supabaseClient.auth.signOut();
@@ -1625,7 +1632,9 @@ async function login(e){
    if(found){found.lastLoginAt=loginTime;found.last=new Date().toLocaleString('ru-RU');}
    state.user={...(found||{}),id:found?.id||cloudUser.id,name:found?.name||meta.display_name||u,login:u,group:found?.group||meta.group_name||'Сотрудник',permissions:found?.permissions||meta.permissions||[],lastLoginAt:loginTime};
    save();
-   await pushCloudStateNow();
+   // Do not keep the login screen waiting for the background cloud write/retries.
+   // save() already schedules synchronization; this extra attempt is best-effort.
+   pushCloudStateNow().catch(err=>console.warn('Post-login cloud sync will retry in background:',err));
    setAccountBackground(u);
    document.getElementById('login').classList.add('hidden');
    document.getElementById('app').classList.remove('hidden');
@@ -1646,6 +1655,7 @@ async function login(e){
    console.error(err);
    const msg=String(err?.message||'').toLowerCase();
    if(authRejected||msg.includes('invalid login credentials')||msg.includes('invalid_credentials'))showMessage('Неверный логин или пароль. Проверьте введённые данные.');
+   else if(msg.includes('timeout'))showMessage('Supabase отвечает слишком долго. Проверьте соединение и попробуйте войти ещё раз.');
    else showMessage('Не удалось выполнить вход. Проверьте подключение к Supabase и попробуйте снова.');
  }finally{
    button.disabled=false;button.classList.remove('is-loading');button.removeAttribute('aria-busy');label.textContent='Войти';
@@ -3252,7 +3262,44 @@ function productOrderLimit(){return Math.max(1,Math.floor(Number(siteSettings().
 function removeProductOrderNotifications(ids){const keys=new Set((Array.isArray(ids)?ids:[ids]).map(x=>String(x)));if(!Array.isArray(state.announcements))return;state.announcements=state.announcements.filter(a=>{const linked=String(a?.productOrderId||'');if(linked&&keys.has(linked))return false;const aid=String(a?.id||'');return ![...keys].some(id=>aid==='ann-po-new-'+id)})}
 function prepareProductOrderCapacity(){const cfg=siteSettings(),all=productOrders(),limit=productOrderLimit();if(all.length<limit)return true;const count=Math.max(1,Math.floor(Number(cfg.productOrderCleanupCount)||10)),statuses=Array.isArray(cfg.productOrderCleanupStatuses)?cfg.productOrderCleanupStatuses:['Заказано','Отказано'];const eligible=all.filter(o=>statuses.includes(String(o.status||''))).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));if(eligible.length<count){alert('Достигнут лимит заказов ('+limit+'). Для автоматической очистки выбрано '+count+' заказов, но со статусами «'+statuses.join('», «')+'» найдено только '+eligible.length+'. Измените настройки очистки или удалите заказы вручную.');return false}const ids=new Set(eligible.slice(0,count).map(o=>String(o.id)));cfg.productOrders=all.filter(o=>!ids.has(String(o.id)));removeProductOrderNotifications([...ids]);save();log('Автоматическая очистка заказов товара','Удалено',String(ids.size),'Статусы: '+statuses.join(', '));if(cfg.productOrders.length>=limit){alert('После очистки лимит всё ещё достигнут. Увеличьте лимит или количество удаляемых заказов.');return false}return true}
 function visibleProductOrders(){const all=productOrders(),login=String(state.user?.login||'').toLowerCase(),processor=can('productOrder.process'),now=Date.now();return all.filter(o=>processor||String(o.createdBy).toLowerCase()===login||(now-(o.createdAt||0)>=30000)).filter(o=>processor||String(o.createdBy).toLowerCase()===login||now-(o.createdAt||0)>=30000)}
-function filterProductOrders(){const root=document.getElementById('productOrdersTable');if(!root)return;const q=(document.getElementById('productOrderSearch')?.value||'').toLowerCase(),status=document.getElementById('productOrderStatus')?.value||'',processor=can('productOrder.process'),login=String(state.user?.login||'').toLowerCase();let a=visibleProductOrders().filter(o=>(!status||o.status===status)&&JSON.stringify(o).toLowerCase().includes(q));a.sort((x,y)=>({Ожидание:0,Заказано:1,Отказано:2}[x.status]-({Ожидание:0,Заказано:1,Отказано:2}[y.status]))||String(x.store||'').localeCompare(String(y.store||''),'ru')||(y.createdAt||0)-(x.createdAt||0)||String(x.code||'').localeCompare(String(y.code||''),'ru',{numeric:true,sensitivity:'base'}));root.innerHTML=a.length?`<div class="table-wrap"><table><thead><tr>${processor?'<th><input type="checkbox" onchange="toggleAllProductOrders(this.checked)"></th>':''}<th>Дата</th><th>Код товара</th><th>Откуда</th><th>Зачем</th><th>Звонили</th><th>Создатель</th><th>Статус</th><th>Действия</th></tr></thead><tbody>${a.map(o=>{const own=String(o.createdBy).toLowerCase()===login,cls=o.status==='Заказано'?'product-order-ordered':o.status==='Отказано'?'product-order-rejected':'product-order-pending';return `<tr class="${cls} ${!processor&&!own&&Date.now()-(o.createdAt||0)<30000?'product-order-hidden':''}">${processor?`<td><input type="checkbox" class="product-order-select" value="${esc(o.id)}"></td>`:''}<td>${esc(new Date(o.createdAt).toLocaleString('ru-RU'))}</td><td><b>${esc(o.code)}</b></td><td>${esc(o.store||'—')}</td><td>${esc(o.reason)}</td><td>${o.supplierCalled?'✓ Да':'Нет'}</td><td>${esc(o.createdByName||o.createdBy)}</td><td><b>${esc(o.status)}</b>${o.status==='Отказано'&&o.reasonForRejection?`<div class="muted">Причина: ${esc(o.reasonForRejection)}</div>`:''}${o.statusAt?`<div class="muted">${esc(new Date(o.statusAt).toLocaleString('ru-RU'))}</div>`:''}</td><td>${(isSiteOwner()||can('productOrder.process')||(own&&can('productOrder.delete')&&o.status==='Ожидание'))?`<button class="btn small danger" id="poDel_${esc(o.id)}" onclick="startDeleteProductOrder('${esc(o.id)}')">Удалить</button>`:''}</td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">Заказов пока нет</div>'}
+function productOrderCodeKey(value){return String(value??'').trim().toLocaleUpperCase('ru-RU').replace(/\\s+/gu,' ')}
+function productOrderCodeColor(value){
+ const key=productOrderCodeKey(value);
+ let hash=2166136261;
+ for(const ch of key){hash^=ch.codePointAt(0);hash=Math.imul(hash,16777619)}
+ const hue=(hash>>>0)%360;
+ return `hsl(${hue} 78% 48%)`;
+}
+function filterProductOrders(){
+ const root=document.getElementById('productOrdersTable');if(!root)return;
+ const q=(document.getElementById('productOrderSearch')?.value||'').toLowerCase(),status=document.getElementById('productOrderStatus')?.value||'',processor=can('productOrder.process'),login=String(state.user?.login||'').toLowerCase();
+ const visible=visibleProductOrders();
+ let a=visible.filter(o=>(!status||o.status===status)&&JSON.stringify(o).toLowerCase().includes(q));
+ const statusRank={Ожидание:0,Заказано:1,Отказано:2};
+ const compareText=(x,y)=>String(x||'').localeCompare(String(y||''),'ru',{numeric:true,sensitivity:'base'});
+ a.sort((x,y)=>{
+  const rank=(statusRank[x.status]??9)-(statusRank[y.status]??9);
+  if(rank)return rank;
+  if(x.status==='Заказано'||x.status==='Отказано'){
+   return (Number(y.createdAt)||0)-(Number(x.createdAt)||0)
+    ||compareText(x.code,y.code)
+    ||compareText(x.store,y.store)
+    ||compareText(x.createdByName||x.createdBy,y.createdByName||y.createdBy);
+  }
+  return compareText(x.store,y.store)
+   ||(Number(y.createdAt)||0)-(Number(x.createdAt)||0)
+   ||compareText(x.code,y.code)
+   ||compareText(x.createdByName||x.createdBy,y.createdByName||y.createdBy);
+ });
+ const pendingCounts=new Map();
+ visible.filter(o=>o.status==='Ожидание').forEach(o=>{const key=productOrderCodeKey(o.code);if(key)pendingCounts.set(key,(pendingCounts.get(key)||0)+1)});
+ root.innerHTML=a.length?`<div class="table-wrap"><table><thead><tr>${processor?'<th><input type="checkbox" onchange="toggleAllProductOrders(this.checked)"></th>':''}<th>Дата</th><th>Код товара</th><th>Откуда</th><th>Зачем</th><th>Звонили</th><th>Создатель</th><th>Статус</th><th>Действия</th></tr></thead><tbody>${a.map(o=>{
+  const own=String(o.createdBy).toLowerCase()===login,cls=o.status==='Заказано'?'product-order-ordered':o.status==='Отказано'?'product-order-rejected':'product-order-pending';
+  const codeKey=productOrderCodeKey(o.code),duplicatePending=o.status==='Ожидание'&&(pendingCounts.get(codeKey)||0)>1;
+  const codeStyle=duplicatePending?` style="font-weight:900;color:${productOrderCodeColor(codeKey)}"`:' style="font-weight:700"';
+  return `<tr class="${cls} ${!processor&&!own&&Date.now()-(o.createdAt||0)<30000?'product-order-hidden':''}">${processor?`<td><input type="checkbox" class="product-order-select" value="${esc(o.id)}"></td>`:''}<td>${esc(new Date(o.createdAt).toLocaleString('ru-RU'))}</td><td><b${codeStyle}>${esc(o.code)}</b></td><td>${esc(o.store||'—')}</td><td>${esc(o.reason)}</td><td>${o.supplierCalled?'✓ Да':'Нет'}</td><td>${esc(o.createdByName||o.createdBy)}</td><td><b>${esc(o.status)}</b>${o.status==='Отказано'&&o.reasonForRejection?`<div class="muted">Причина: ${esc(o.reasonForRejection)}</div>`:''}${o.statusAt?`<div class="muted">${esc(new Date(o.statusAt).toLocaleString('ru-RU'))}</div>`:''}</td><td>${(isSiteOwner()||can('productOrder.process')||(own&&can('productOrder.delete')&&o.status==='Ожидание'))?`<button class="btn small danger" id="poDel_${esc(o.id)}" onclick="startDeleteProductOrder('${esc(o.id)}')">Удалить</button>`:''}</td></tr>`;
+ }).join('')}</tbody></table></div>`:'<div class="empty">Заказов пока нет</div>';
+}
 function toggleAllProductOrders(on){document.querySelectorAll('.product-order-select').forEach(x=>x.checked=on)}
 function selectedProductOrders(){const ids=[...document.querySelectorAll('.product-order-select:checked')].map(x=>x.value);return productOrders().filter(o=>ids.includes(String(o.id)))}
 function getSelectedOrderCodes(){if(!requirePermission('productOrder.process'))return;const codes=selectedProductOrders().map(o=>o.code).filter(Boolean).join(' ');if(!codes){alert('Выберите заказы.');return}navigator.clipboard?.writeText(codes).then(()=>alert('Коды скопированы: '+codes)).catch(()=>prompt('Скопируйте коды товаров:',codes))}
