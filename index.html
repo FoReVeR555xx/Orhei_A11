@@ -1592,6 +1592,13 @@ async function refreshFromRealtime(reason='изменение'){if(!supabaseClie
 function scheduleRealtimeRefresh(reason){realtimeLastEventAt=Date.now();setRealtimeIndicator('syncing','Обновление…');clearTimeout(realtimeRefreshTimer);realtimeRefreshTimer=setTimeout(()=>refreshFromRealtime(reason),180)}
 function stopRealtimeSync(){if(realtimeChannel&&supabaseClient){try{supabaseClient.removeChannel(realtimeChannel)}catch(_){}}realtimeChannel=null;clearTimeout(realtimeRefreshTimer);clearTimeout(realtimeReconnectTimer);realtimeRefreshTimer=null;realtimeReconnectTimer=null;setRealtimeIndicator('offline','Нет связи')}
 function startRealtimeSync(){if(!supabaseClient||!state.user)return;stopRealtimeSync();setRealtimeIndicator('connecting','Подключение…');realtimeChannel=supabaseClient.channel('orhei-live-sync-main').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.main'},()=>scheduleRealtimeRefresh('app_state')).on('postgres_changes',{event:'*',schema:'public',table:'services'},()=>scheduleRealtimeRefresh('services')).on('postgres_changes',{event:'*',schema:'public',table:'orders'},()=>scheduleRealtimeRefresh('orders')).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},()=>scheduleRealtimeRefresh('profiles')).subscribe(status=>{if(status==='SUBSCRIBED'){realtimeLastEventAt=Date.now();setRealtimeIndicator('live','В реальном времени');flushPendingSync()}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){setRealtimeIndicator('error','Нет синхронизации');clearTimeout(realtimeReconnectTimer);realtimeReconnectTimer=setTimeout(()=>{if(state.user)startRealtimeSync()},5000)}else if(status==='CLOSED'){setRealtimeIndicator('offline','Нет связи')}})}
+function withLoginTimeout(promise,ms,label){
+ let timer;
+ return Promise.race([
+  Promise.resolve(promise),
+  new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+' timeout')),ms)})
+ ]).finally(()=>clearTimeout(timer));
+}
 async function login(e){
  e.preventDefault();
  const form=document.getElementById('loginForm'),button=form.querySelector('.login-submit'),message=document.getElementById('loginMessage');
@@ -1605,14 +1612,14 @@ async function login(e){
  const label=button.querySelector('.login-submit-label');label.textContent='Выполняется вход…';
  let authRejected=false;
  try{
-   const {data,error}=await supabaseClient.auth.signInWithPassword({email:cloudEmail(u),password:p});
+   const {data,error}=await withLoginTimeout(supabaseClient.auth.signInWithPassword({email:cloudEmail(u),password:p}),15000,'Supabase auth');
    if(error){authRejected=true;throw error;}
    const cloudUser=data.user;
    const hasPendingLocal=readPendingSync().length>0;
-   const hadCloud=hasPendingLocal?true:await loadCloudState();
+   const hadCloud=hasPendingLocal?true:await withLoginTimeout(loadCloudState(),12000,'Загрузка данных');
    ensurePermissionCatalog();
-   if(!hasPendingLocal) await loadCloudCollections(); else cloudReady=true;
-   await syncCloudProfiles();
+   if(!hasPendingLocal) await withLoginTimeout(loadCloudCollections(),12000,'Загрузка документов'); else cloudReady=true;
+   await withLoginTimeout(syncCloudProfiles(),10000,'Загрузка пользователей');
    let found=(state.users||[]).find(x=>String(x.login||'').toLowerCase()===u.toLowerCase());
    if(found && found.status==='Неактивен'){
      await supabaseClient.auth.signOut();
@@ -1625,7 +1632,9 @@ async function login(e){
    if(found){found.lastLoginAt=loginTime;found.last=new Date().toLocaleString('ru-RU');}
    state.user={...(found||{}),id:found?.id||cloudUser.id,name:found?.name||meta.display_name||u,login:u,group:found?.group||meta.group_name||'Сотрудник',permissions:found?.permissions||meta.permissions||[],lastLoginAt:loginTime};
    save();
-   await pushCloudStateNow();
+   // Do not keep the login screen waiting for the background cloud write/retries.
+   // save() already schedules synchronization; this extra attempt is best-effort.
+   pushCloudStateNow().catch(err=>console.warn('Post-login cloud sync will retry in background:',err));
    setAccountBackground(u);
    document.getElementById('login').classList.add('hidden');
    document.getElementById('app').classList.remove('hidden');
@@ -1646,6 +1655,7 @@ async function login(e){
    console.error(err);
    const msg=String(err?.message||'').toLowerCase();
    if(authRejected||msg.includes('invalid login credentials')||msg.includes('invalid_credentials'))showMessage('Неверный логин или пароль. Проверьте введённые данные.');
+   else if(msg.includes('timeout'))showMessage('Supabase отвечает слишком долго. Проверьте соединение и попробуйте войти ещё раз.');
    else showMessage('Не удалось выполнить вход. Проверьте подключение к Supabase и попробуйте снова.');
  }finally{
    button.disabled=false;button.classList.remove('is-loading');button.removeAttribute('aria-busy');label.textContent='Войти';
