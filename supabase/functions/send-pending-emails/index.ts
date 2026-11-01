@@ -42,6 +42,22 @@ Deno.serve(async (req) => {
   const now = Date.now();
   const pendingByLogin = new Map<string, any[]>();
   let skipped = 0, errors = 0, sent = 0;
+  // Fetch existing log/sent markers in batches once per run instead of issuing
+  // multiple SELECTs for every notification-recipient pair.
+  const notificationIds = [...new Set(announcements.map((n: any) => str(n?.id)).filter(Boolean))];
+  const logKeys = new Set<string>();
+  const sentKeys = new Set<string>();
+  const keyOf = (login: string, notificationId: string) => `${login}::${notificationId}`;
+  if (notificationIds.length) {
+    const [{ data: existingLogs, error: logsError }, { data: existingSent, error: sentError }] = await Promise.all([
+      supabase.from('email_send_logs').select('recipient_login,notification_id,status').in('notification_id', notificationIds),
+      supabase.from('email_notification_sent').select('recipient_login,notification_id').in('notification_id', notificationIds)
+    ]);
+    if (logsError) return json({ error: `Could not load existing email logs: ${logsError.message}` }, 500);
+    if (sentError) return json({ error: `Could not load sent notification markers: ${sentError.message}` }, 500);
+    for (const row of existingLogs ?? []) logKeys.add(`${keyOf(str(row.recipient_login), str(row.notification_id))}::${str(row.status)}`);
+    for (const row of existingSent ?? []) sentKeys.add(keyOf(str(row.recipient_login), str(row.notification_id)));
+  }
 
   // Collect only notifications that individually satisfy the existing delay rule.
   // All eligible unread notifications are grouped into one digest per recipient.
@@ -53,15 +69,21 @@ Deno.serve(async (req) => {
       const email = str(recipients[login]).trim();
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         const reason = !email ? 'Письмо не отправлено: для аккаунта не указан адрес электронной почты в настройках рассылки.' : `Письмо не отправлено: некорректный адрес электронной почты «${email}».`;
-        const { data: priorFailure } = await supabase.from('email_send_logs').select('id').eq('recipient_login', login).eq('notification_id', str(n.id)).in('status', ['failed','skipped']).limit(1);
-        if (!priorFailure?.length) await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email || null, notification_id: str(n.id), email_type: 'notification', subject: `Письмо не отправлено: ${str(n.message).slice(0,160) || 'уведомление'}`, body: reason + `\n\nТекст уведомления: ${str(n.message).trim()}`, status: 'failed', error_message: reason });
+        const logKey = keyOf(login, str(n.id));
+        if (!logKeys.has(`${logKey}::failed`) && !logKeys.has(`${logKey}::skipped`)) {
+          const { error: logError } = await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email || null, notification_id: str(n.id), email_type: 'notification', subject: `Письмо не отправлено: ${str(n.message).slice(0,160) || 'уведомление'}`, body: reason + `\n\nТекст уведомления: ${str(n.message).trim()}`, status: 'failed', error_message: reason });
+          if (logError) errors++; else logKeys.add(`${logKey}::failed`);
+        }
         skipped++; continue;
       }
       const readBy = Array.isArray(n.readBy) ? n.readBy.map((x: unknown) => str(x).toLowerCase()) : [];
       if (readBy.includes(login)) {
         const reason = 'Письмо не отправлено: внутреннее уведомление было прочитано до окончания задержки.';
-        const { data: priorReadLog } = await supabase.from('email_send_logs').select('id').eq('recipient_login', login).eq('notification_id', str(n.id)).eq('status', 'skipped').limit(1);
-        if (!priorReadLog?.length) await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email, notification_id: str(n.id), email_type: 'notification', subject: `Не отправлено (прочитано): ${str(n.message).slice(0,150)}`, body: reason + `\n\nТекст уведомления: ${str(n.message).trim()}`, status: 'skipped', error_message: reason });
+        const logKey = keyOf(login, str(n.id));
+        if (!logKeys.has(`${logKey}::skipped`)) {
+          const { error: logError } = await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email, notification_id: str(n.id), email_type: 'notification', subject: `Не отправлено (прочитано): ${str(n.message).slice(0,150)}`, body: reason + `\n\nТекст уведомления: ${str(n.message).trim()}`, status: 'skipped', error_message: reason });
+          if (logError) errors++; else logKeys.add(`${logKey}::skipped`);
+        }
         skipped++; continue;
       }
       if (now - created < delayMs) continue;
@@ -80,23 +102,21 @@ Deno.serve(async (req) => {
       const email = str(recipients[login]).trim();
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
       const readBy = Array.isArray(n.readBy) ? n.readBy.map((x: unknown) => str(x).toLowerCase()) : [];
-      const { data: sentRecord, error: sentLookupError } = await supabase.from('email_notification_sent').select('notification_id').eq('notification_id', notificationId).eq('recipient_login', login).maybeSingle();
-      if (sentLookupError) { errors++; continue; }
-      const { data: priorScheduled, error: scheduledLookupError } = await supabase.from('email_send_logs').select('id,status').eq('recipient_login', login).eq('notification_id', notificationId).eq('status', 'scheduled').limit(1);
-      if (scheduledLookupError) { errors++; continue; }
+      const logKey = keyOf(login, notificationId);
+      const hasScheduled = logKeys.has(`${logKey}::scheduled`);
       if (readBy.includes(login)) {
-        if (priorScheduled?.length) await supabase.from('email_send_logs').update({ status: 'skipped', error_message: 'Пропущено: уведомление прочитано до отправки.' }).eq('recipient_login', login).eq('notification_id', notificationId).eq('status', 'scheduled');
+        if (hasScheduled) await supabase.from('email_send_logs').update({ status: 'skipped', error_message: 'Пропущено: уведомление прочитано до отправки.' }).eq('recipient_login', login).eq('notification_id', notificationId).eq('status', 'scheduled');
         continue;
       }
-      if (sentRecord) {
-        await supabase.from('email_send_logs').update({ status: 'sent', error_message: null }).eq('recipient_login', login).eq('notification_id', notificationId).eq('status', 'scheduled');
+      if (sentKeys.has(logKey)) {
+        if (hasScheduled) await supabase.from('email_send_logs').update({ status: 'sent', error_message: null }).eq('recipient_login', login).eq('notification_id', notificationId).eq('status', 'scheduled');
         continue;
       }
       const sendAt = created + delayMs;
       const scheduleText = `Запланировано к отправке не ранее ${fmtTime(sendAt)}. Уведомление создано: ${fmtTime(created)}. Статус: ${now >= sendAt ? 'ожидает ближайшего запуска рассылки' : 'ожидает окончания задержки'}.`;
-      if (!priorScheduled?.length) {
+      if (!hasScheduled) {
         const { error: insertScheduledError } = await supabase.from('email_send_logs').insert({ recipient_login: login, recipient_email: email, notification_id: notificationId, email_type: 'notification', subject: `Запланировано: ${str(n.message).slice(0, 180) || 'уведомление'}`, body: `${scheduleText}\n\nТекст уведомления: ${str(n.message).trim()}`, error_message: scheduleText, status: 'scheduled' });
-        if (insertScheduledError) errors++;
+        if (insertScheduledError) errors++; else logKeys.add(`${logKey}::scheduled`);
       } else {
         await supabase.from('email_send_logs').update({ recipient_email: email, body: `${scheduleText}\n\nТекст уведомления: ${str(n.message).trim()}`, error_message: scheduleText }).eq('recipient_login', login).eq('notification_id', notificationId).eq('status', 'scheduled');
       }
@@ -109,9 +129,7 @@ Deno.serve(async (req) => {
     const candidates = pendingByLogin.get(login) ?? [];
     const fresh: any[] = [];
     for (const item of candidates) {
-      const { data: prior, error: lookupError } = await supabase.from('email_notification_sent').select('notification_id').eq('notification_id', str(item.notification.id)).eq('recipient_login', login).maybeSingle();
-      if (lookupError) { errors++; continue; }
-      if (prior) { skipped++; continue; }
+      if (sentKeys.has(keyOf(login, str(item.notification.id)))) { skipped++; continue; }
       fresh.push(item);
     }
     pendingByLogin.set(login, fresh);
@@ -181,14 +199,17 @@ Deno.serve(async (req) => {
     try {
       await transporter.sendMail({ from: `Orhei A11 <${gmailUser}>`, to: claimed[0].email, subject, text: body, html: `<div style="font-family:Arial,sans-serif;white-space:pre-wrap;line-height:1.6">${safe(body)}</div>` });
       if (logRow?.id) await supabase.from('email_send_logs').update({ status: 'sent' }).eq('id', logRow.id);
-      for (const item of claimed) await supabase.from('email_send_logs').update({ status: 'sent', error_message: null }).eq('recipient_login', login).eq('notification_id', str(item.notification.id)).eq('status', 'scheduled');
+      const claimedIds = claimed.map(item => str(item.notification.id));
+      await supabase.from('email_send_logs').update({ status: 'sent', error_message: null }).eq('recipient_login', login).in('notification_id', claimedIds).eq('status', 'scheduled');
+      for (const id of claimedIds) sentKeys.add(keyOf(login, id));
       sent++;
     } catch (e) {
       const message = e instanceof Error ? e.message : str(e);
       if (logRow?.id) await supabase.from('email_send_logs').update({ status: 'failed', error_message: message.slice(0, 2000) }).eq('id', logRow.id);
-      for (const item of claimed) await supabase.from('email_send_logs').update({ status: 'failed', error_message: message.slice(0, 2000) }).eq('recipient_login', login).eq('notification_id', str(item.notification.id)).eq('status', 'scheduled');
+      const claimedIds = claimed.map(item => str(item.notification.id));
+      await supabase.from('email_send_logs').update({ status: 'failed', error_message: message.slice(0, 2000) }).eq('recipient_login', login).in('notification_id', claimedIds).eq('status', 'scheduled');
       // Roll back all claims in this digest so the next scheduled run can retry.
-      for (const item of claimed) await supabase.from('email_notification_sent').delete().eq('notification_id', str(item.notification.id)).eq('recipient_login', login);
+      await supabase.from('email_notification_sent').delete().eq('recipient_login', login).in('notification_id', claimedIds);
       errors++;
     }
   }
