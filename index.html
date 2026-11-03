@@ -3131,7 +3131,7 @@ async function generateDeliveryReport(e){
  e.preventDefault();if(!requirePermission('delivery.report'))return;
  const from=new Date((document.getElementById('deliveryReportFrom')?.value||'')+'T00:00:00'),to=new Date((document.getElementById('deliveryReportTo')?.value||'')+'T23:59:59.999');
  if(Number.isNaN(from.getTime())||Number.isNaN(to.getTime())||from>to){alert('Проверьте выбранный период.');return;}
- const rows=state.deliveries.filter(d=>{const dt=deliveryReportDateValue(d);return dt&&dt>=from&&dt<=to;});
+ const rows=state.deliveries.filter(d=>{const dt=deliveryReportDateValue(d);return dt&&dt>=from&&dt<=to;}).sort((a,b)=>{const da=deliveryReportDateValue(a)?.getTime()||0,db=deliveryReportDateValue(b)?.getTime()||0;return da-db;});
  try{
   const response=await fetch('assets/delivery-report-template.xlsx',{cache:'no-store'});if(!response.ok)throw new Error('Не удалось загрузить шаблон Excel');
   const wb=XLSX.read(await response.arrayBuffer(),{type:'array',cellStyles:true}),ws=wb.Sheets[wb.SheetNames[0]],columns=deliveryReportColumns();
