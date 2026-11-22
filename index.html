@@ -3234,7 +3234,7 @@ function deliveryReportDateBounds(){
  const dates=(state.deliveries||[]).map(d=>deliveryReportDateValue(d)).filter(Boolean).sort((a,b)=>a-b);
  return dates.length?{first:dates[0],last:dates[dates.length-1]}:null;
 }
-function normalizeDeliveryAddress(value){return String(value??'').replace(/[^\s]+/gu,word=>{const chars=Array.from(word);if(chars.length===1)return chars[0].toLocaleLowerCase();return chars[0].toLocaleUpperCase()+chars.slice(1).join('').toLocaleLowerCase()})}
+function normalizeDeliveryAddress(value){return String(value??'').replace(/\p{L}+/gu,word=>{const chars=Array.from(word);return chars[0].toLocaleUpperCase()+chars.slice(1).join('').toLocaleLowerCase()})}
 function createDelivery(e,isIndividual=false){
  e.preventDefault();
  if(!prepareDeliveryCapacity())return;
