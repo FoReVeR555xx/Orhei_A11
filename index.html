@@ -1585,6 +1585,8 @@ const FIXED_ACCOUNTS={
   kbt:{name:'KBT11',group:'Сервис — AV11/KBT11',permissions:['service.view','service.create','service.print','service.send','service.delete','delivery.view','delivery.create','delivery.print','delivery.send','delivery.delete']}
 };
 const deleteTimers={};
+// Initialize audit state before ensureFixedAccounts() calls save()/captureAuditChanges().
+let lastAuditSnapshot=null,pendingActionLogId=null,pendingManualAuditChanges=null;
 // Migrate the old fixed-account login names to the new short logins.
 state.users.forEach(u=>{
   if(u.login==='KBT11') u.login='kbt';
@@ -1603,7 +1605,6 @@ ensureFixedAccounts();
 if(!Array.isArray(state.deliveryCategories)) state.deliveryCategories=[];
 state.deliveries.forEach(d=>{if(d.showTotalCost===undefined)d.showTotalCost=!!(d.totalValue);if(d.express24===undefined)d.express24=false;if(!d.specialCondition&&d.specialConditions)d.specialCondition=d.specialConditions;if(d.recipientAddress===undefined)d.recipientAddress=d.recipientData1||'';if(d.recipientFio===undefined)d.recipientFio='';if(d.recipientPhone===undefined)d.recipientPhone='';for(let i=1;i<=6;i++){if(d['model'+i]===undefined)d['model'+i]=d['recipient'+i]||''}});
 state.users.forEach(u=>{if((u.login==='av'||u.login==='kbt')&&Array.isArray(u.permissions)){['delivery.view','delivery.create','delivery.print','delivery.send','delivery.delete'].forEach(p=>{if(!u.permissions.includes(p))u.permissions.push(p)})}});
-let lastAuditSnapshot=null,pendingActionLogId=null,pendingManualAuditChanges=null;
 const AUDIT_RESTORE_WINDOW_MS=7*24*60*60*1000;
 function auditHashText(value){let h=2166136261;for(let i=0;i<value.length;i++){h^=value.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(16)}
 function auditSanitize(value,key=''){if(/password|passwd|encrypted_password|access[_-]?token|refresh[_-]?token|api[_-]?key|private[_-]?key|secret|authorization|(^|_)jwt($|_)|otp|totp|(^|_)pin($|_)/i.test(String(key)))return undefined;if(typeof value==='string'&&/^data:[^,]+;base64,/i.test(value)&&value.length>120000)return `[[AUDIT_FILE_SKIPPED:${value.length}:${auditHashText(value)}]]`;if(Array.isArray(value))return value.map(v=>auditSanitize(v,'')).filter(v=>v!==undefined);if(value&&typeof value==='object'){const out={};for(const [k,v] of Object.entries(value)){const clean=auditSanitize(v,k);if(clean!==undefined)out[k]=clean}return out}return value}
